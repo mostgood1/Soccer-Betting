@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soccer Betting Platform - Predictive Analytics</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/game-weeks.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <ul class="nav-menu">
+                <li class="nav-item"><a href="#all" class="nav-link active" id="nav-all">All Matches</a></li>
+                <li class="nav-item"><a href="#weeks" class="nav-link" id="nav-weeks">Game Weeks</a></li>
+                <li class="nav-item"><a href="/recommendations" class="nav-link">Recommendations</a></li>
+                <li class="nav-item league-item">
+                    <select id="league-select" title="League" class="league-select">
+                        <option value="ALL">All Leagues</option>
+                        <option value="PL">Premier League</option>
+                        <option value="BL1">Bundesliga</option>
+                        <option value="FL1">Ligue 1</option>
+                        <option value="SA">Serie A</option>
+                        <option value="PD">La Liga</option>
+                    </select>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- All Matches (by date across leagues) -->
+        <section id="all-matches" class="section active">
+            <div class="section-header">
+                <h2><i class="fas fa-globe"></i> Matches by Date (All Leagues)</h2>
+                <p class="section-subtitle">Upcoming fixtures grouped by day with live market odds</p>
+            </div>
+            <div id="all-matches-container">
+                <div class="loading">Loading matches…</div>
+            </div>
+        </section>
+        <!-- Game Weeks Section -->
+        <section id="game-weeks" class="section">
+            <div class="section-header">
+                <h2><i class="fas fa-calendar-week"></i> Game Weeks & Model Reconciliation</h2>
+                <p class="section-subtitle">Track predictions vs actual results by week</p>
+            </div>
+            <div id="game-week-container">
+                <div class="loading">Loading game weeks...</div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Loading EPL Data...</p>
+    </div>
+
+    <!-- Error Toast -->
+    <div id="error-toast" class="toast error">
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="error-message">Error occurred</span>
+        <button id="close-error" class="close-btn">&times;</button>
+    </div>
+
+    
+
+                                <script src="/static/all-matches.js"></script>
+                                <script src="/static/game-week-manager.js"></script>
+                                <script src="/static/app.js"></script>
+                <script>
+                    // Propagate selected league in query string for the app manager to pick up
+                    (function(){
+                        const sel = document.getElementById('league-select');
+                        if (!sel) return;
+                        // initialize from query
+                        const url = new URL(window.location.href);
+                                                const lg = url.searchParams.get('league') || 'ALL';
+                        sel.value = lg;
+                                // Update nav links to carry league param
+                                const links = document.querySelectorAll('.nav-menu a');
+                                links.forEach(a=>{
+                                    try{
+                                        const u = new URL(a.getAttribute('href'), window.location.origin);
+                                        u.searchParams.set('league', lg);
+                                        a.setAttribute('href', u.pathname + u.search);
+                                    }catch{}
+                                });
+                        sel.addEventListener('change', ()=>{
+                            url.searchParams.set('league', sel.value);
+                            window.location.href = url.toString();
+                        });
+                                                // simple tab nav
+                                                function setTab(which){
+                                                    const all = document.getElementById('all-matches');
+                                                    const weeks = document.getElementById('game-weeks');
+                                                    const na = document.getElementById('nav-all');
+                                                    const nw = document.getElementById('nav-weeks');
+                                                    if (which==='weeks'){
+                                                        all.classList.remove('active'); weeks.classList.add('active');
+                                                        na.classList.remove('active'); nw.classList.add('active');
+                                                    } else {
+                                                        weeks.classList.remove('active'); all.classList.add('active');
+                                                        nw.classList.remove('active'); na.classList.add('active');
+                                                    }
+                                                }
+                                                document.getElementById('nav-all')?.addEventListener('click', (e)=>{ e.preventDefault(); setTab('all'); });
+                                                document.getElementById('nav-weeks')?.addEventListener('click', (e)=>{ e.preventDefault(); setTab('weeks'); });
+                                                // default tab based on league param: ALL => All Matches
+                                                setTab(lg==='ALL' ? 'all' : 'weeks');
+                    })();
+                </script>
+        <script>
+            // Apply sportsbook dark theme automatically
+            document.addEventListener('DOMContentLoaded', () => {
+                document.body.classList.add('dark-sb');
+            });
+        </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: soccer-betting
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: ML_SKIP_STARTUP_TRAIN
+        value: "1"
+      - key: ODDS_API_KEY
+        sync: false
+      - key: ODDS_API_REGIONS
+        value: "uk,eu,us"
+      - key: TZ
+        value: UTC
+      - key: ALLOW_ON_DEMAND_PREDICTIONS
+        value: "1"
+    disk:
+      name: snapshot-data
+      mountPath: /app/data
+      sizeGB: 1
+    previews:
+      enabled: true
