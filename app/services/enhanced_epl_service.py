@@ -8,7 +8,37 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 import logging
-from premier_league import RankingTable, MatchStatistics, PlayerSeasonLeaders
+
+# Optional dependency: `premier_league` is not guaranteed in all envs (e.g., Render)
+# Provide defensive stubs so this module can import and gracefully fall back.
+try:
+    from premier_league import RankingTable, MatchStatistics, PlayerSeasonLeaders  # type: ignore
+    _PREMIER_LEAGUE_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _PREMIER_LEAGUE_AVAILABLE = False
+
+    class RankingTable:  # minimal stub
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        # enhanced_epl_service.get_detailed_team_stats() calls get_ranking()
+        def get_ranking(self):
+            return None  # returning None triggers the built-in fallback path
+
+    class MatchStatistics:  # minimal stub (not used directly here)
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+    class PlayerSeasonLeaders:  # minimal stub used by get_top_scorer_predictions()
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def get_goal_leaders(self):
+            try:
+                import pandas as pd  # local import to avoid global dependency if pandas missing
+                return pd.DataFrame([])
+            except Exception:
+                return None
 
 logger = logging.getLogger(__name__)
 
