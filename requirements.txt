@@ -11,7 +11,6 @@ python-multipart==0.0.6
 pandas==2.1.4
 numpy==1.24.4
 scikit-learn==1.3.2
-tensorflow==2.15.0
 requests==2.31.0
 aiohttp==3.9.1
 python-dotenv==1.0.0
@@ -25,3 +24,4 @@ mypy==1.7.1
 httpx==0.25.2
 factory-boy==3.3.0
 soccerdata>=1.5.0
+lxml==5.2.1

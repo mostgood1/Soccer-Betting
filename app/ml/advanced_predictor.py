@@ -120,7 +120,7 @@ class AdvancedMLPredictor:
         self.is_trained = False
         self.training_accuracy = {}
         self.model_save_path = "app/ml/saved_models"
-        self.model_version = "v2.0.7"  # semantic versioning MAJOR.MINOR.PATCH
+        self.model_version = "v2.0.8"  # semantic versioning MAJOR.MINOR.PATCH
         
         # Ensure model directory exists
         os.makedirs(self.model_save_path, exist_ok=True)
@@ -151,6 +151,10 @@ class AdvancedMLPredictor:
         """Generate training data from current season and historical patterns"""
         logger.info(f"Generating {num_samples} training samples...")
         import os
+        # Render-safe: allow hard opt-out of any heavy synthetic generation
+        if os.getenv('ML_DISABLE_TRAINING','0') == '1':
+            logger.warning('ML_DISABLE_TRAINING=1 set; returning minimal synthetic dataset for boot safety')
+            return self._create_synthetic_training_data(min(50, num_samples))
         if os.getenv('ML_FORCE_SYNTHETIC','0') == '1':
             logger.warning("ML_FORCE_SYNTHETIC=1 set; generating fully synthetic training dataset")
             base = self._create_synthetic_training_data(num_samples)
