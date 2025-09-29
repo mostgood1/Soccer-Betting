@@ -149,6 +149,9 @@ data/processed/
 *.csv
 *.xlsx
 *.json
+# Allow season fixture caches to be versioned (needed for Render baked hydration)
+!data/football_data_*_2025_2026.json
+!data/football_data_epl_2025_2026.json
 
 # Logs
 logs/
