@@ -10,12 +10,15 @@ class AllMatchesManager {
       this.filterLeague = url.searchParams.get('league') || 'ALL';
       // All Matches default: current day only (can override via ?days=N)
       const daysParam = url.searchParams.get('days');
-      this.daysAhead = Number.isFinite(parseInt(daysParam, 10)) ? parseInt(daysParam, 10) : 0;
+      const parsed = parseInt(daysParam || '', 10);
+      this.onlyToday = (url.searchParams.get('today') || '') !== '0';
+      // Backend requires days_ahead >= 1; use 1 and filter to today client-side when onlyToday
+      this.daysAhead = Number.isFinite(parsed) ? Math.max(1, parsed) : 1;
       this.daysBack = 0;
-      if (url.searchParams.get('today') === '1') { this.daysAhead = 0; this.daysBack = 0; }
     } catch {
       this.filterLeague = 'ALL';
-      this.daysAhead = 0;
+      this.onlyToday = true;
+      this.daysAhead = 1; // satisfy API
       this.daysBack = 0;
     }
     this.init();
@@ -67,7 +70,12 @@ class AllMatchesManager {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`by-date fetch failed (${resp.status})`);
       const data = await resp.json();
-      this.groups = Array.isArray(data.groups) ? data.groups : [];
+      let groups = Array.isArray(data.groups) ? data.groups : [];
+      if (this.onlyToday && groups.length) {
+        const todayUtc = new Date().toISOString().slice(0,10);
+        groups = groups.filter(g => (g.date || '').slice(0,10) === todayUtc);
+      }
+      this.groups = groups;
     } catch (e) {
       console.warn('by-date groups unavailable', e);
       this.groups = [];
@@ -261,7 +269,7 @@ class AllMatchesManager {
         sel.addEventListener('change', () => {
           const url = new URL(window.location.href);
           if (sel.value === 'ALL') url.searchParams.delete('league'); else url.searchParams.set('league', sel.value);
-          // Keep All Matches to current day when switching leagues
+          // Keep All Matches to current day when switching leagues (can override via ?today=0)
           url.searchParams.set('today', '1');
           window.location.href = url.toString();
         });
