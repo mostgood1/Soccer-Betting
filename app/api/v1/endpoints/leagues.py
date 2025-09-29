@@ -12,16 +12,19 @@ async def get_leagues(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     country: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get leagues with optional filtering"""
     query = db.query(League)
-    
+
     if country:
         query = query.filter(League.country == country)
-    
+
     leagues = query.offset(skip).limit(limit).all()
-    return [{"id": league.id, "name": league.name, "country": league.country} for league in leagues]
+    return [
+        {"id": league.id, "name": league.name, "country": league.country}
+        for league in leagues
+    ]
 
 
 @router.get("/{league_id}")

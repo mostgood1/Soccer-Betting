@@ -26,8 +26,12 @@ def test_odds_snapshot_listing(tmp_path: Path, monkeypatch):
     # Create a temp odds_snapshots dir with a couple files
     base = tmp_path / "odds_snapshots"
     base.mkdir(parents=True, exist_ok=True)
-    (base / "week_5_odds_snapshot_20250926T000000Z.json").write_text("{}", encoding="utf-8")
-    (base / "week_6_odds_snapshot_20250926T010000Z.json").write_text("{}", encoding="utf-8")
+    (base / "week_5_odds_snapshot_20250926T000000Z.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    (base / "week_6_odds_snapshot_20250926T010000Z.json").write_text(
+        "{}", encoding="utf-8"
+    )
 
     # Point app to temp dir by monkeypatching Path in this module's scope
     # Simple approach: change CWD for this test so relative Path("data/odds_snapshots") resolves under tmp

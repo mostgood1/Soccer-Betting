@@ -38,7 +38,7 @@ class MatchUpdate(BaseModel):
 
 class MatchResponse(MatchBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     home_score: Optional[int] = None
     away_score: Optional[int] = None

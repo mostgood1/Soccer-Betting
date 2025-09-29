@@ -10,7 +10,7 @@ from app.models.team import Team
 def seed_epl_data():
     """Seed EPL teams and league data"""
     db = SessionLocal()
-    
+
     try:
         # Create EPL league
         epl = League(
@@ -18,12 +18,12 @@ def seed_epl_data():
             country="England",
             season="2024-25",
             api_id="39",  # Common API ID for EPL
-            is_active=True
+            is_active=True,
         )
         db.add(epl)
         db.commit()
         db.refresh(epl)
-        
+
         # EPL Teams for 2024-25 season
         epl_teams = [
             {"name": "Arsenal", "short_name": "ARS", "api_id": "42"},
@@ -45,9 +45,9 @@ def seed_epl_data():
             {"name": "Southampton", "short_name": "SOU", "api_id": "41"},
             {"name": "Tottenham Hotspur", "short_name": "TOT", "api_id": "47"},
             {"name": "West Ham United", "short_name": "WHU", "api_id": "48"},
-            {"name": "Wolverhampton Wanderers", "short_name": "WOL", "api_id": "39"}
+            {"name": "Wolverhampton Wanderers", "short_name": "WOL", "api_id": "39"},
         ]
-        
+
         # Create team records
         for team_data in epl_teams:
             team = Team(
@@ -55,13 +55,13 @@ def seed_epl_data():
                 short_name=team_data["short_name"],
                 league_id=epl.id,
                 api_id=team_data["api_id"],
-                is_active=True
+                is_active=True,
             )
             db.add(team)
-        
+
         db.commit()
         print(f"Successfully seeded EPL data: 1 league and {len(epl_teams)} teams")
-        
+
     except Exception as e:
         db.rollback()
         print(f"Error seeding data: {str(e)}")
@@ -72,23 +72,23 @@ def seed_epl_data():
 def seed_bet_markets():
     """Seed betting market definitions"""
     from app.models.bet_market import BetMarket, SUPPORTED_MARKETS
-    
+
     db = SessionLocal()
-    
+
     try:
         for market_key, market_info in SUPPORTED_MARKETS.items():
             market = BetMarket(
                 market_name=market_key,
-                market_type=market_info['type'],
-                description=market_info['description'],
+                market_type=market_info["type"],
+                description=market_info["description"],
                 is_active=True,
-                category='standard'
+                category="standard",
             )
             db.add(market)
-        
+
         db.commit()
         print(f"Successfully seeded {len(SUPPORTED_MARKETS)} betting markets")
-        
+
     except Exception as e:
         db.rollback()
         print(f"Error seeding betting markets: {str(e)}")

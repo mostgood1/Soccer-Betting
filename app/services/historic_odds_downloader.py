@@ -32,7 +32,13 @@ def season_code(year: int) -> str:
     return f"{y1}{y2}"
 
 
-def download_epl_history(start_year: int, end_year: int, out_dir: str = "data/odds", overwrite: bool = False, timeout: int = 15) -> Dict[str, Any]:
+def download_epl_history(
+    start_year: int,
+    end_year: int,
+    out_dir: str = "data/odds",
+    overwrite: bool = False,
+    timeout: int = 15,
+) -> Dict[str, Any]:
     if requests is None:
         return {"error": "requests not available"}
     if end_year < start_year:
@@ -52,14 +58,26 @@ def download_epl_history(start_year: int, end_year: int, out_dir: str = "data/od
         try:
             resp = requests.get(url, timeout=timeout)
             if resp.status_code != 200:
-                errors.append({"season": f"{year}-{year+1}", "status": str(resp.status_code), "url": url})
+                errors.append(
+                    {
+                        "season": f"{year}-{year+1}",
+                        "status": str(resp.status_code),
+                        "url": url,
+                    }
+                )
                 continue
             text = resp.text
             # Basic sanity: Must have header containing HomeTeam,AwayTeam
-            if 'HomeTeam' not in text or 'AwayTeam' not in text:
-                errors.append({"season": f"{year}-{year+1}", "error": "missing expected columns", "url": url})
+            if "HomeTeam" not in text or "AwayTeam" not in text:
+                errors.append(
+                    {
+                        "season": f"{year}-{year+1}",
+                        "error": "missing expected columns",
+                        "url": url,
+                    }
+                )
                 continue
-            dest.write_text(text, encoding='utf-8')
+            dest.write_text(text, encoding="utf-8")
             downloaded.append(dest.name)
         except Exception as e:  # pragma: no cover
             errors.append({"season": f"{year}-{year+1}", "error": str(e), "url": url})
@@ -69,5 +87,5 @@ def download_epl_history(start_year: int, end_year: int, out_dir: str = "data/od
         "downloaded": downloaded,
         "skipped": skipped,
         "errors": errors,
-        "output_dir": str(out_path)
+        "output_dir": str(out_path),
     }

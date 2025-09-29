@@ -18,22 +18,26 @@ async def get_teams(
     try:
         # Get teams from SoccerData service
         teams = soccer_data.get_epl_teams()
-        
+
         # Filter by league if specified
         if league:
-            teams = [team for team in teams if league.lower() in team.get("league", "").lower()]
-        
+            teams = [
+                team
+                for team in teams
+                if league.lower() in team.get("league", "").lower()
+            ]
+
         # Apply pagination
         total_teams = len(teams)
-        teams = teams[skip:skip + limit]
-        
+        teams = teams[skip : skip + limit]
+
         # Return with additional metadata
         return [
             {
                 "id": idx + skip + 1,
                 "name": team["name"],
                 "league": team.get("league", "Premier League"),
-                "country": team.get("country", "England")
+                "country": team.get("country", "England"),
             }
             for idx, team in enumerate(teams)
         ]
@@ -48,17 +52,17 @@ async def get_team(team_id: int):
         teams = soccer_data.get_epl_teams()
         if 1 <= team_id <= len(teams):
             team = teams[team_id - 1]
-            
+
             # Get additional team statistics
             team_stats = soccer_data.get_team_statistics()
             stats = next((s for s in team_stats if s["name"] == team["name"]), {})
-            
+
             return {
                 "id": team_id,
                 "name": team["name"],
                 "league": team.get("league", "Premier League"),
                 "country": team.get("country", "England"),
-                "stats": stats
+                "stats": stats,
             }
         else:
             raise HTTPException(status_code=404, detail="Team not found")
@@ -76,18 +80,16 @@ async def get_team_form(team_id: int):
         if 1 <= team_id <= len(teams):
             team = teams[team_id - 1]
             form = soccer_data.calculate_team_form(team["name"])
-            
-            return {
-                "team_id": team_id,
-                "team_name": team["name"],
-                "form": form
-            }
+
+            return {"team_id": team_id, "team_name": team["name"], "form": form}
         else:
             raise HTTPException(status_code=404, detail="Team not found")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching team form: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching team form: {str(e)}"
+        )
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
     return {"id": team.id, "name": team.name, "short_name": team.short_name}

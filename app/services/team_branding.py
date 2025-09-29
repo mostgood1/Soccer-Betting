@@ -30,5 +30,6 @@ BRANDING: Dict[str, Dict[str, Any]] = {
     "Sunderland AFC": {"primary": "#E31B23", "secondary": "#FFFFFF"},
 }
 
+
 def get_team_branding() -> Dict[str, Dict[str, Any]]:
     return BRANDING

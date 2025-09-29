@@ -15,16 +15,16 @@ async def get_predictions(
     limit: int = Query(100, ge=1, le=1000),
     match_id: Optional[int] = None,
     model_version: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get predictions with optional filtering"""
     query = db.query(Prediction)
-    
+
     if match_id:
         query = query.filter(Prediction.match_id == match_id)
     if model_version:
         query = query.filter(Prediction.model_version == model_version)
-    
+
     predictions = query.offset(skip).limit(limit).all()
     return predictions
 
@@ -40,21 +40,20 @@ async def get_prediction(prediction_id: int, db: Session = Depends(get_db)):
 
 @router.post("/generate/{match_id}", response_model=PredictionResponse)
 async def generate_prediction(
-    match_id: int,
-    model_version: str = "v1.0",
-    db: Session = Depends(get_db)
+    match_id: int, model_version: str = "v1.0", db: Session = Depends(get_db)
 ):
     """Generate a new prediction for a match"""
     # Check if match exists
     from app.models.match import Match
+
     match = db.query(Match).filter(Match.id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
-    
+
     # Generate prediction using the service
     prediction_service = PredictionService(db)
     prediction = prediction_service.generate_prediction(match_id, model_version)
-    
+
     return prediction
 
 
@@ -71,12 +70,12 @@ async def evaluate_prediction(prediction_id: int, db: Session = Depends(get_db))
     prediction = db.query(Prediction).filter(Prediction.id == prediction_id).first()
     if not prediction:
         raise HTTPException(status_code=404, detail="Prediction not found")
-    
+
     prediction_service = PredictionService(db)
     accuracy_results = prediction_service.evaluate_prediction(prediction_id)
-    
+
     return {
         "prediction_id": prediction_id,
         "accuracy_results": accuracy_results,
-        "message": "Prediction accuracy evaluated successfully"
+        "message": "Prediction accuracy evaluated successfully",
     }

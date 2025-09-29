@@ -27,6 +27,7 @@ from typing import Dict, Any, List
 
 FEATURE_VERSION = "fv2"  # Bumped due to pairing variance & engineered feature expansion
 
+
 class TeamSeedMetricsService:
     def __init__(self):
         self._cache: Dict[str, Dict[str, Any]] = {}
@@ -49,26 +50,27 @@ class TeamSeedMetricsService:
         conversion = rng.uniform(0.10, 0.22)
         suppression = rng.uniform(0.80, 1.15)
         metrics = {
-            'attack_rating': round(attack, 4),
-            'defense_rating': round(defense, 4),
-            'form_score': round(form, 4),
-            'tempo_factor': round(tempo, 4),
-            'finishing_quality': round(finishing, 4),
-            'chance_creation': round(creation, 4),
-            'conversion_rate': round(conversion, 4),
-            'suppression_factor': round(suppression, 4),
-            'feature_version': FEATURE_VERSION
+            "attack_rating": round(attack, 4),
+            "defense_rating": round(defense, 4),
+            "form_score": round(form, 4),
+            "tempo_factor": round(tempo, 4),
+            "finishing_quality": round(finishing, 4),
+            "chance_creation": round(creation, 4),
+            "conversion_rate": round(conversion, 4),
+            "suppression_factor": round(suppression, 4),
+            "feature_version": FEATURE_VERSION,
         }
         self._cache[team_name] = metrics
         return metrics
 
     def enrich_teams(self, teams: List[Dict[str, Any]]):
         for t in teams:
-            name = t.get('name') or t.get('team_name')
+            name = t.get("name") or t.get("team_name")
             if not name:
                 continue
             metrics = self.get_metrics(name)
-            t['seed_metrics'] = metrics
+            t["seed_metrics"] = metrics
         return teams
+
 
 team_seed_metrics_service = TeamSeedMetricsService()

@@ -51,7 +51,9 @@ def test_week_odds_endpoint():
 
 
 def test_week_edges_endpoint():
-    r = client.get("/api/betting/edges/week/5?limit=3&threshold=0.01&allow_on_demand=true")
+    r = client.get(
+        "/api/betting/edges/week/5?limit=3&threshold=0.01&allow_on_demand=true"
+    )
     assert r.status_code == 200
     data = r.json()
     assert data.get("week") == 5

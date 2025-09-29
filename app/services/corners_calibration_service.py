@@ -17,11 +17,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 def _repo_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def _default_path() -> str:
-    return os.path.join(_repo_root(), 'data', 'corners_calibration.json')
+    return os.path.join(_repo_root(), "data", "corners_calibration.json")
 
 
 @dataclass
@@ -52,11 +52,17 @@ class CornersCalibrationService:
         return 1.0 / (1.0 + math.exp(-x))
 
     def _predict_raw(self, z: float) -> float:
-        zt = z / (self.params.z_scale if self.params.z_scale and self.params.z_scale > 0 else 1.0)
+        zt = z / (
+            self.params.z_scale
+            if self.params.z_scale and self.params.z_scale > 0
+            else 1.0
+        )
         return self._sigmoid(self.params.intercept + self.params.slope * zt)
 
     # --- API ---
-    def fit(self, zs: List[float], ys: List[int], up_to_week: int) -> CornersCalibrationParams:
+    def fit(
+        self, zs: List[float], ys: List[int], up_to_week: int
+    ) -> CornersCalibrationParams:
         """Fit logistic regression with single feature z using Newton-Raphson.
         ys must be binary (0/1). Returns fitted params.
         """
@@ -67,8 +73,8 @@ class CornersCalibrationService:
             self.params.last_fit_utc = datetime.utcnow().isoformat()
             return self.params
         # Feature scaling for stability
-        mean_z = sum(zs)/len(zs)
-        var_z = sum((z - mean_z)**2 for z in zs)/len(zs)
+        mean_z = sum(zs) / len(zs)
+        var_z = sum((z - mean_z) ** 2 for z in zs) / len(zs)
         std_z = max(var_z**0.5, 1e-6)
         z_scaled = [(z - mean_z) / std_z for z in zs]
         # Start weights small
@@ -84,7 +90,7 @@ class CornersCalibrationService:
             for z, y in zip(z_scaled, ys):
                 p = 1.0 / (1.0 + math.exp(-(w0 + w1 * z)))
                 r = p * (1 - p)
-                g0 += (p - y)
+                g0 += p - y
                 g1 += (p - y) * z
                 h00 += r
                 h01 += r * z
@@ -122,11 +128,21 @@ class CornersCalibrationService:
         # Clamp weight to [0, 0.9]
         self.params.blend_weight = max(0.0, min(float(blend_weight), 0.9))
 
-    def predict_over_prob(self, mu: float, line: float, week: Optional[int] = None, market_over_prob: Optional[float] = None) -> float:
+    def predict_over_prob(
+        self,
+        mu: float,
+        line: float,
+        week: Optional[int] = None,
+        market_over_prob: Optional[float] = None,
+    ) -> float:
         z = float(mu) - float(line)
         base = self._predict_raw(z)
         # If week >= threshold and we have market, blend
-        if week is not None and week >= self.params.threshold_week and market_over_prob is not None:
+        if (
+            week is not None
+            and week >= self.params.threshold_week
+            and market_over_prob is not None
+        ):
             w = self.params.blend_weight
             return (1.0 - w) * base + w * float(market_over_prob)
         return base
@@ -134,7 +150,7 @@ class CornersCalibrationService:
     def save(self, path: Optional[str] = None) -> str:
         path = path or _default_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(asdict(self.params), f, indent=2)
         return path
 
@@ -142,7 +158,7 @@ class CornersCalibrationService:
         path = path or _default_path()
         if not os.path.exists(path):
             return self.params
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         for k, v in (data or {}).items():
             if hasattr(self.params, k):

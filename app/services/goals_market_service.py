@@ -29,17 +29,17 @@ from .team_name_normalizer import normalize_team_name
 
 
 def _repo_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 def _only_date(s: Optional[str]) -> Optional[str]:
     if not s:
         return None
     try:
-        if 'T' in s:
-            return s.split('T', 1)[0]
-        if ' ' in s:
-            return s.split(' ', 1)[0]
+        if "T" in s:
+            return s.split("T", 1)[0]
+        if " " in s:
+            return s.split(" ", 1)[0]
         return s[:10]
     except Exception:
         return None
@@ -80,8 +80,10 @@ class GoalsMarketStore:
 
     def load_csv(self, path: str) -> None:
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader((row for row in f if not row.lstrip().startswith('#')))
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(
+                    (row for row in f if not row.lstrip().startswith("#"))
+                )
                 for row in reader:
                     self._ingest_row(row)
         except Exception:
@@ -89,10 +91,10 @@ class GoalsMarketStore:
 
     def load_json(self, path: str) -> None:
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                data = data.get('records') or data.get('markets') or []
+                data = data.get("records") or data.get("markets") or []
             if isinstance(data, list):
                 for row in data:
                     if isinstance(row, dict):
@@ -105,31 +107,40 @@ class GoalsMarketStore:
             if not p or not os.path.exists(p):
                 continue
             ext = os.path.splitext(p)[1].lower()
-            if ext == '.csv':
+            if ext == ".csv":
                 self.load_csv(p)
-            elif ext == '.json':
+            elif ext == ".json":
                 self.load_json(p)
 
     def _ingest_row(self, row: Dict[str, Any]) -> None:
         try:
-            date = _only_date(str(row.get('date') or row.get('match_date') or row.get('utc_date')))
-            home = normalize_team_name(row.get('home_team') or row.get('home'))
-            away = normalize_team_name(row.get('away_team') or row.get('away'))
-            line = float(row.get('line'))
-            over_odds = float(row.get('over_odds'))
-            under_odds = float(row.get('under_odds'))
-            bookmaker = (row.get('bookmaker') or row.get('bm') or '').strip() or None
+            date = _only_date(
+                str(row.get("date") or row.get("match_date") or row.get("utc_date"))
+            )
+            home = normalize_team_name(row.get("home_team") or row.get("home"))
+            away = normalize_team_name(row.get("away_team") or row.get("away"))
+            line = float(row.get("line"))
+            over_odds = float(row.get("over_odds"))
+            under_odds = float(row.get("under_odds"))
+            bookmaker = (row.get("bookmaker") or row.get("bm") or "").strip() or None
             if not (date and home and away and line and over_odds and under_odds):
                 return
             rec = GoalsMarketRecord(
-                date=date, home=home, away=away, line=line,
-                over_odds=over_odds, under_odds=under_odds, bookmaker=bookmaker,
+                date=date,
+                home=home,
+                away=away,
+                line=line,
+                over_odds=over_odds,
+                under_odds=under_odds,
+                bookmaker=bookmaker,
             )
             self._add(rec)
         except Exception:
             return
 
-    def _closest_line(self, mapping: Dict[float, GoalsMarketRecord], target_line: float) -> Optional[GoalsMarketRecord]:
+    def _closest_line(
+        self, mapping: Dict[float, GoalsMarketRecord], target_line: float
+    ) -> Optional[GoalsMarketRecord]:
         if not mapping:
             return None
         if target_line in mapping:
@@ -137,8 +148,10 @@ class GoalsMarketStore:
         best_line = min(mapping.keys(), key=lambda x: abs(x - target_line))
         return mapping.get(best_line)
 
-    def lookup_total(self, date: str, home: str, away: str, line: float) -> Optional[Tuple[float, Optional[str], float]]:
-        d = _only_date(date) or ''
+    def lookup_total(
+        self, date: str, home: str, away: str, line: float
+    ) -> Optional[Tuple[float, Optional[str], float]]:
+        d = _only_date(date) or ""
         h = normalize_team_name(home) or home
         a = normalize_team_name(away) or away
         key = f"{d}|{h.lower()}|{a.lower()}|totals"
@@ -154,12 +167,12 @@ class GoalsMarketStore:
 
 def _default_candidate_paths() -> Iterable[str]:
     root = _repo_root()
-    data_dir = os.path.join(root, 'data')
+    data_dir = os.path.join(root, "data")
     return [
-        os.path.join(data_dir, 'goals_market_lines_2025_26.csv'),
-        os.path.join(data_dir, 'goals_market_lines_2025_26.json'),
-        os.path.join(data_dir, 'goals_market_lines_manual.csv'),
-        os.path.join(data_dir, 'goals_market_lines_manual.json'),
+        os.path.join(data_dir, "goals_market_lines_2025_26.csv"),
+        os.path.join(data_dir, "goals_market_lines_2025_26.json"),
+        os.path.join(data_dir, "goals_market_lines_manual.csv"),
+        os.path.join(data_dir, "goals_market_lines_manual.json"),
     ]
 
 
@@ -171,6 +184,7 @@ def load_default() -> GoalsMarketStore:
 
 # Module-level singleton
 goals_market_store: GoalsMarketStore = load_default()
+
 
 def reload_goals_market_store() -> int:
     """Reload default goals market files. Returns number of totals entries indexed."""

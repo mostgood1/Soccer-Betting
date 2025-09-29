@@ -7,5 +7,5 @@ Examples:
 import sys
 from app.offline.tasks import main as offline_main
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     offline_main()

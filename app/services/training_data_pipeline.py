@@ -44,20 +44,22 @@ def build_historical_training_dataset(limit: Optional[int] = None) -> pd.DataFra
     try:
         hist_df = historical_epl_service.get_ml_training_data()
         if hist_df is None or hist_df.empty:
-            logger.warning("Historical dataset is empty; falling back to predictor's internal generator")
+            logger.warning(
+                "Historical dataset is empty; falling back to predictor's internal generator"
+            )
             return pd.DataFrame()
         if limit is not None and limit > 0:
             hist_df = hist_df.head(int(limit))
 
         rows: List[Dict[str, Any]] = []
-        feat_cols = list(getattr(advanced_ml_predictor, 'feature_columns', []))
+        feat_cols = list(getattr(advanced_ml_predictor, "feature_columns", []))
         # Safety: ensure list
         if not isinstance(feat_cols, list):
             feat_cols = []
 
         for _, r in hist_df.iterrows():
-            home = r.get('home_team')
-            away = r.get('away_team')
+            home = r.get("home_team")
+            away = r.get("away_team")
             if not home or not away:
                 continue
             # Fetch features using the same path as live predictions
@@ -68,35 +70,40 @@ def build_historical_training_dataset(limit: Optional[int] = None) -> pd.DataFra
                     features_map[fc] = 0.0
 
             # Targets
-            home_score = float(r.get('home_score', 0) or 0)
-            away_score = float(r.get('away_score', 0) or 0)
-            total_goals = float(r.get('total_goals', home_score + away_score) or (home_score + away_score))
+            home_score = float(r.get("home_score", 0) or 0)
+            away_score = float(r.get("away_score", 0) or 0)
+            total_goals = float(
+                r.get("total_goals", home_score + away_score)
+                or (home_score + away_score)
+            )
             # First-half goals not present in this dataset; approximate ~45%
-            first_half_goals = float(np.clip(total_goals * 0.45 + np.random.normal(0, 0.2), 0, None))
+            first_half_goals = float(
+                np.clip(total_goals * 0.45 + np.random.normal(0, 0.2), 0, None)
+            )
             # Corner totals heuristic from goals + mild noise, clamped to sensible range
             tc_base = 3.4 * total_goals + np.random.normal(0, 1.5)
             total_corners = float(np.clip(tc_base, 4.0, 18.0))
             home_corners = float(total_corners * 0.52)
             away_corners = float(total_corners * 0.48)
-            match_result_code = _result_to_code(r.get('result'))
+            match_result_code = _result_to_code(r.get("result"))
 
             row = {
                 **features_map,
-                'home_goals': home_score,
-                'away_goals': away_score,
-                'total_goals': total_goals,
-                'first_half_goals': first_half_goals,
-                'match_result': match_result_code,
-                'total_corners': total_corners,
-                'home_corners': home_corners,
-                'away_corners': away_corners,
+                "home_goals": home_score,
+                "away_goals": away_score,
+                "total_goals": total_goals,
+                "first_half_goals": first_half_goals,
+                "match_result": match_result_code,
+                "total_corners": total_corners,
+                "home_corners": home_corners,
+                "away_corners": away_corners,
                 # Optional market placeholders to maintain stable schema if present
-                'market_home_implied': 0.0,
-                'market_draw_implied': 0.0,
-                'market_away_implied': 0.0,
-                'market_overround': 0.0,
-                'market_fav_prob': 0.0,
-                'market_prob_skew': 0.0,
+                "market_home_implied": 0.0,
+                "market_draw_implied": 0.0,
+                "market_away_implied": 0.0,
+                "market_overround": 0.0,
+                "market_fav_prob": 0.0,
+                "market_prob_skew": 0.0,
             }
             rows.append(row)
 
@@ -105,7 +112,9 @@ def build_historical_training_dataset(limit: Optional[int] = None) -> pd.DataFra
         for fc in feat_cols:
             if fc not in df.columns:
                 df[fc] = 0.0
-        logger.info(f"Built historical training dataset with {len(df)} rows and {len(df.columns)} columns")
+        logger.info(
+            f"Built historical training dataset with {len(df)} rows and {len(df.columns)} columns"
+        )
         return df
     except Exception as e:
         logger.error(f"Failed to build historical training dataset: {e}")

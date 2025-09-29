@@ -18,7 +18,7 @@ class PredictionCreate(PredictionBase):
 
 class PredictionResponse(PredictionBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     total_goals_confidence: Optional[float] = None
     first_half_goals_confidence: Optional[float] = None
