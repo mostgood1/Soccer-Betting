@@ -1,8 +1,8 @@
 """
 Betting Odds Service
 
-Primary: The Odds API (real data) across supported leagues.
-Fallback (EPL only): Bovada coupon API when The Odds API is unavailable.
+Primary: Bovada coupon API (across supported leagues where available).
+Fallback: The Odds API (H2H) when Bovada is unavailable for a fixture.
 
 No synthetic odds are generated. If providers are unavailable, return empty odds
 so callers can skip those matches rather than display fabricated data.
@@ -96,7 +96,10 @@ class BettingOddsService:
         return {'provider': 'the-odds-api', 'prefetched': ok, 'targets': targets, 'errors': errs}
 
     def prefetch_bovada(self) -> Dict[str, Any]:
-        """Prefetch Bovada snapshots for all supported leagues for non-H2H markets."""
+        """Prefetch Bovada snapshots for all supported leagues.
+        Includes H2H probabilities and a variety of derivative markets (totals, halves,
+        team totals, BTTS, double chance, DNB, corners, cards, handicaps), where offered.
+        """
         out = {}
         now = datetime.now()
         def _do(key: str, fetcher):
@@ -146,7 +149,7 @@ class BettingOddsService:
     
     def get_match_odds(self, home_team: str, away_team: str, match_date: str = None) -> Dict:
         """Get real betting odds for a specific match.
-        Tries The Odds API across supported leagues; falls back to Bovada for EPL.
+        Tries Bovada first (primary). If no Bovada event is found, falls back to The Odds API (H2H).
         Returns {} when providers are unavailable or match cannot be resolved.
         """
         cache_key = f"odds_{home_team}_{away_team}_{match_date or 'unknown'}"
@@ -157,31 +160,26 @@ class BettingOddsService:
         n_home = normalize_team_name(home_team) or home_team
         n_away = normalize_team_name(away_team) or away_team
 
-        # 1) Try The Odds API across supported sport keys (H2H primary)
-        odds = self._lookup_the_odds_api(n_home, n_away)
-        if not odds and (('manchester' in n_home.lower()) or ('manchester' in n_away.lower())):
-            # Tiny heuristic: try raw names if normalization obscured branded forms
-            odds = self._lookup_the_odds_api(home_team, away_team)
+        odds: Optional[Dict[str, Any]] = None
 
-        # 2) EPL Bovada: always try to merge non-H2H markets when an EPL event exists.
+        # 1) Try Bovada first (primary across supported leagues)
         try:
             bov_ev = self._get_bovada_event(n_home, n_away)
         except Exception:
             bov_ev = None
         if bov_ev:
-            if odds:
-                # Merge non-H2H from Bovada into existing structure
-                try:
-                    odds = self._merge_bovada_non_h2h(odds, bov_ev)
-                except Exception:
-                    pass
-            else:
-                # Build full structure from Bovada when The Odds API didn't match
-                try:
-                    odds = self._build_from_bovada(bov_ev)
-                except Exception:
-                    pass
-        # 3) If still missing and no Bovada match, odds may remain None/empty
+            try:
+                odds = self._build_from_bovada(bov_ev)
+            except Exception:
+                odds = None
+
+        # 2) If Bovada missing, fall back to The Odds API (H2H)
+        if not odds:
+            api_odds = self._lookup_the_odds_api(n_home, n_away)
+            if not api_odds and (('manchester' in n_home.lower()) or ('manchester' in n_away.lower())):
+                # Tiny heuristic: try raw names if normalization obscured branded forms
+                api_odds = self._lookup_the_odds_api(home_team, away_team)
+            odds = api_odds
 
         # Persist minimal structure to reduce duplicate provider calls within TTL
         self._cache_odds(cache_key, odds or {})

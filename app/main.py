@@ -867,7 +867,7 @@ def api_admin_odds_prefetch(sport_key: Optional[str] = Query(None, description="
 
 @app.post("/api/admin/odds/prefetch-bovada")
 def api_admin_odds_prefetch_bovada():
-    """Prefetch EPL Bovada snapshot for non-H2H markets (totals, corners, team totals)."""
+    """Prefetch Bovada snapshots for supported leagues (primary provider), including H2H and derivative markets where available."""
     try:
         res = betting_odds_service.prefetch_bovada()
         return {'success': True, 'result': res}
