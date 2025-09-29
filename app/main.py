@@ -1174,6 +1174,142 @@ def api_admin_cron_summary():
     out["cron_token_configured"] = cron_ok
     return out
 
+@app.get("/api/admin/status/hydration")
+def api_admin_hydration_status():
+    """Report hydration state: presence of baked league files in data/, and in-memory fixture counts.
+    Useful to validate that first-boot copy from /app/baked ran correctly on Render.
+    """
+    try:
+        from pathlib import Path as _P
+        data_base = _P('data')
+        baked_base = _P('/app/baked')
+        league_files = {
+            'PL': 'football_data_PL_2025_2026.json',
+            'BL1': 'football_data_BL1_2025_2026.json',
+            'FL1': 'football_data_FL1_2025_2026.json',
+            'SA': 'football_data_SA_2025_2026.json',
+            'PD': 'football_data_PD_2025_2026.json',
+            'PL_LONG': 'football_data_epl_2025_2026.json',
+        }
+        files = {}
+        for code, fname in league_files.items():
+            dp = data_base / fname
+            bp = baked_base / fname
+            files[code] = {
+                'data_exists': dp.exists(),
+                'data_size': (dp.stat().st_size if dp.exists() else 0),
+                'baked_exists': bp.exists(),
+                'baked_size': (bp.stat().st_size if bp.exists() else 0),
+                'data_path': str(dp),
+                'baked_path': str(bp),
+            }
+        # Fixture counts in memory
+        from .services.league_manager import get_service as _get
+        counts = {}
+        try:
+            counts['PL'] = len(enhanced_epl_service.get_all_matches())
+        except Exception:
+            counts['PL'] = 0
+        for code in ['BL1','FL1','SA','PD']:
+            try:
+                svc = _get(code)
+                cnt = len(svc.get_all_matches() if hasattr(svc, 'get_all_matches') else svc.get_matches())
+            except Exception:
+                cnt = 0
+            counts[code] = cnt
+        return {
+            'success': True,
+            'data_dir': str(data_base.resolve()),
+            'baked_dir': str(baked_base),
+            'files': files,
+            'fixture_counts': counts,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hydration status failed: {e}")
+
+@app.post("/api/admin/data/rehydrate")
+def api_admin_rehydrate(
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN env var (if set)"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token> header (optional)"),
+):
+    """Force-copy baked league JSONs from /app/baked into data/ and refresh services.
+    This does not require external API keys and is safe to run multiple times.
+    """
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        from pathlib import Path as _P
+        data_base = _P('data'); data_base.mkdir(parents=True, exist_ok=True)
+        baked_base = _P('/app/baked')
+        league_files = {
+            'PL': 'football_data_PL_2025_2026.json',
+            'BL1': 'football_data_BL1_2025_2026.json',
+            'FL1': 'football_data_FL1_2025_2026.json',
+            'SA': 'football_data_SA_2025_2026.json',
+            'PD': 'football_data_PD_2025_2026.json',
+            'PL_LONG': 'football_data_epl_2025_2026.json',
+        }
+        copied = []
+        for code, fname in league_files.items():
+            src = baked_base / fname
+            if src.exists():
+                dest = data_base / fname
+                try:
+                    copyfile(str(src), str(dest))
+                    copied.append(str(dest))
+                except Exception as _e:
+                    # continue but record error
+                    pass
+        # Refresh in-memory services
+        try:
+            enhanced_epl_service.refresh_data()
+        except Exception:
+            pass
+        try:
+            from .services.league_manager import get_service as _get
+            for code in ['BL1','FL1','SA','PD']:
+                try:
+                    svc = _get(code)
+                    if hasattr(svc, 'refresh_data'):
+                        svc.refresh_data()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # Return counts
+        from .services.league_manager import get_service as _get
+        counts = {}
+        try:
+            counts['PL'] = len(enhanced_epl_service.get_all_matches())
+        except Exception:
+            counts['PL'] = 0
+        for code in ['BL1','FL1','SA','PD']:
+            try:
+                svc = _get(code)
+                cnt = len(svc.get_all_matches() if hasattr(svc, 'get_all_matches') else svc.get_matches())
+            except Exception:
+                cnt = 0
+            counts[code] = cnt
+        return {"success": True, "copied": len(copied), "fixture_counts": counts}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rehydrate failed: {e}")
+
+@app.get("/api/admin/status/ops-dashboard")
+def api_admin_ops_dashboard():
+    """Tiny ops dashboard: cron summary + fixture counts + model status."""
+    try:
+        cron = api_admin_cron_summary()
+        hyd = api_admin_hydration_status()
+        mdl = advanced_ml_predictor.get_model_performance()
+        return {
+            'cron': cron,
+            'fixtures': hyd.get('fixture_counts') if isinstance(hyd, dict) else {},
+            'model': mdl,
+            'time': datetime.utcnow().isoformat() + 'Z'
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ops dashboard failed: {e}")
+
 @app.get("/api/betting/value-bets")
 async def get_value_betting_opportunities():
     """Get value betting opportunities across upcoming matches"""

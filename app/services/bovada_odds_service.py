@@ -91,21 +91,33 @@ def _normalize_probs(values: Dict[str, Optional[float]]) -> Dict[str, float]:
 def _fetch_bovada_coupon(url_suffix: str, timeout: Optional[int] = None) -> Dict[str, Any]:
     """Fetch a Bovada coupon by URL suffix and parse to normalized events structure.
     Example suffixes: '/soccer/england/premier-league', '/soccer/germany/1-bundesliga'
+    Tries the primary base (BOVADA_BASE_URL) then optional alternates (BOVADA_ALT_BASES)
+    such as Bodog in case of regional blocks.
     """
     if requests is None:
         return {'error': 'requests not available'}
-    base = os.getenv('BOVADA_BASE_URL', 'https://www.bovada.lv')
-    url = base.rstrip('/') + '/services/sports/event/coupon/events/A/description' + url_suffix
+    # Build candidate base URLs list
+    primary = os.getenv('BOVADA_BASE_URL', 'https://www.bovada.lv')
+    alts_env = os.getenv('BOVADA_ALT_BASES', '')
+    alt_list = [s.strip() for s in alts_env.split(',') if s.strip()] or ['https://www.bodog.eu']
+    bases = [primary] + [b for b in alt_list if b != primary]
     timeout = timeout or int(os.getenv('BOVADA_TIMEOUT', '12'))
     headers = {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (OddsFetcher)'
     }
-    try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        if r.status_code != 200:
-            return {'error': f'status {r.status_code}', 'body': r.text[:400]}
-        arr = r.json()
+    last_err: Dict[str, Any] = {}
+    for base in bases:
+        url = base.rstrip('/') + '/services/sports/event/coupon/events/A/description' + url_suffix
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            if r.status_code != 200:
+                last_err = {'error': f'status {r.status_code}', 'body': r.text[:400], 'base': base}
+                continue
+            arr = r.json()
+        except Exception as e:  # pragma: no cover
+            last_err = {'error': str(e), 'base': base}
+            continue
         events_out: List[Dict[str, Any]] = []
         # Response can be nested; flatten out event list
         def iter_events(payload: Any):
@@ -582,9 +594,13 @@ def _fetch_bovada_coupon(url_suffix: str, timeout: Optional[int] = None) -> Dict
                     events_out.append(norm)
             except Exception:
                 continue
-        return {'events': events_out, 'provider': 'bovada'}
-    except Exception as e:  # pragma: no cover
-        return {'error': str(e)}
+        # If we found events, return immediately; otherwise, try next base
+        if len(events_out) > 0:
+            return {'events': events_out, 'provider': 'bovada', 'base': base}
+        # capture empty attempt info and try next
+        last_err = {'error': 'no_events', 'base': base}
+    # All bases failed or returned no events
+    return last_err or {'events': []}
 
 
 def _fetch_bovada_multi(suffixes: List[str], timeout: Optional[int] = None) -> Dict[str, Any]:
