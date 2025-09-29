@@ -26,15 +26,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Also bake a copy of the EPL Football-Data cache outside /app/data so it isn't
-# shadowed by the persistent volume in production (Render mounts /app/data).
-RUN mkdir -p /app/baked \
-    && cp data/football_data_epl_2025_2026.json /app/baked/football_data_epl_2025_2026.json || true \
-    && cp data/football_data_PL_2025_2026.json /app/baked/football_data_PL_2025_2026.json || true \
-    && cp data/football_data_BL1_2025_2026.json /app/baked/football_data_BL1_2025_2026.json || true \
-    && cp data/football_data_FL1_2025_2026.json /app/baked/football_data_FL1_2025_2026.json || true \
-    && cp data/football_data_SA_2025_2026.json /app/baked/football_data_SA_2025_2026.json || true \
-    && cp data/football_data_PD_2025_2026.json /app/baked/football_data_PD_2025_2026.json || true
+# Bake league fixture caches into /app/baked (outside /app/data which Render mounts)
+RUN mkdir -p /app/baked
+# Use COPY so files are embedded even if cp would be skipped
+COPY data/football_data_epl_2025_2026.json /app/baked/
+COPY data/football_data_PL_2025_2026.json /app/baked/
+COPY data/football_data_BL1_2025_2026.json /app/baked/
+COPY data/football_data_FL1_2025_2026.json /app/baked/
+COPY data/football_data_SA_2025_2026.json /app/baked/
+COPY data/football_data_PD_2025_2026.json /app/baked/
 
 # Expose port (informational)
 EXPOSE 8000
