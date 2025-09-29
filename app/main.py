@@ -1515,6 +1515,7 @@ async def get_current_week(league: Optional[str] = Query(None, description="Leag
 async def api_games_by_date(
     leagues: Optional[str] = Query(None, description="Comma-separated league codes to include; defaults to all supported"),
     days_ahead: int = Query(14, ge=1, le=60),
+    days_back: int = Query(7, ge=0, le=60),
     include_completed: bool = Query(False)
 ):
     """Return matches grouped by calendar date across leagues.
@@ -1531,6 +1532,7 @@ async def api_games_by_date(
         # Time window
         now_utc = datetime.now(timezone.utc)
         end_utc = now_utc + timedelta(days=int(days_ahead))
+        start_utc = now_utc - timedelta(days=int(days_back))
 
         def _parse_dt(s: Optional[str]) -> Optional[datetime]:
             """Parse ISO string to a timezone-aware UTC datetime.
@@ -1577,11 +1579,9 @@ async def api_games_by_date(
                 dt = _parse_dt(m.get('utc_date') or m.get('date'))
                 if dt is None:
                     continue
-                # Compare aware datetimes in UTC
-                if dt < now_utc or dt > end_utc:
-                    # Include only upcoming window; allow completed if flag set and within window
-                    if not include_completed:
-                        continue
+                # Keep only matches within [start_utc, end_utc]
+                if dt < start_utc or dt > end_utc:
+                    continue
                 status = (m.get('status') or '').upper()
                 is_completed = m.get('is_completed') or status in ['FINISHED', 'COMPLETED']
                 if is_completed and not include_completed:

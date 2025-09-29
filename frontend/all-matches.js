@@ -54,7 +54,9 @@ class AllMatchesManager {
     try {
       const qs = [];
       if (this.filterLeague && this.filterLeague !== 'ALL') qs.push(`leagues=${encodeURIComponent(this.filterLeague)}`);
-      qs.push(`days_ahead=${encodeURIComponent(this.daysAhead)}`);
+  qs.push(`days_ahead=${encodeURIComponent(this.daysAhead)}`);
+  qs.push(`days_back=7`);
+  qs.push(`include_completed=true`);
       const url = `${this.apiBaseUrl}/api/games/by-date?${qs.join('&')}`;
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`by-date fetch failed (${resp.status})`);
@@ -88,7 +90,7 @@ class AllMatchesManager {
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 10000);
       const resp = await fetch(
-        `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=60&league=${encodeURIComponent(league)}`,
+        `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=20&league=${encodeURIComponent(league)}`,
         { signal: controller.signal }
       );
       clearTimeout(t);
