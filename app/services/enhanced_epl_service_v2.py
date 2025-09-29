@@ -45,19 +45,23 @@ class EnhancedEPLService:
             print(f"Football-Data.org: {fixtures_count} fixtures loaded")
     
     def _load_football_data(self) -> Dict:
-        """Load cached Football-Data.org data"""
-        data_file = os.path.join(
+        """Load cached Football-Data.org data.
+        Prefer the standard data file under repo (/app/data), but if a persistent
+        volume is mounted and the file is absent (common on first boot), fallback
+        to a baked copy at /app/baked created by the Dockerfile.
+        """
+        primary_file = os.path.join(
             os.path.dirname(__file__), '..', '..', 'data', 
             'football_data_epl_2025_2026.json'
         )
-        
+        fallback_file = "/app/baked/football_data_epl_2025_2026.json"
         try:
-            if os.path.exists(data_file):
-                with open(data_file, 'r', encoding='utf-8') as f:
+            path = primary_file if os.path.exists(primary_file) else fallback_file
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Failed to load Football-Data.org cache: {e}")
-        
         return {}
     
     def _is_cache_valid(self, key: str) -> bool:
