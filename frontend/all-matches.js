@@ -75,6 +75,24 @@ class AllMatchesManager {
         const todayUtc = new Date().toISOString().slice(0,10);
         groups = groups.filter(g => (g.date || '').slice(0,10) === todayUtc);
       }
+      // UX fallback: if no matches today, auto-show the nearest upcoming match day within 7 days
+      if ((!groups || groups.length === 0) && this.onlyToday) {
+        try {
+          const url2 = `${this.apiBaseUrl}/api/games/by-date?days_ahead=7&days_back=0&include_completed=false${this.filterLeague && this.filterLeague !== 'ALL' ? `&leagues=${encodeURIComponent(this.filterLeague)}` : ''}`;
+          const r2 = await fetch(url2);
+          if (r2.ok) {
+            const d2 = await r2.json();
+            const g2 = Array.isArray(d2.groups) ? d2.groups : [];
+            if (g2.length) {
+              // pick earliest date
+              g2.sort((a,b) => (a.date||'').localeCompare(b.date||''));
+              this.groups = [g2[0]];
+              this.fallbackInfo = { type: 'next-day', date: g2[0].date };
+              return;
+            }
+          }
+        } catch (_) { /* ignore */ }
+      }
       this.groups = groups;
     } catch (e) {
       console.warn('by-date groups unavailable', e);
@@ -153,8 +171,17 @@ class AllMatchesManager {
       container.innerHTML = '<div class="no-matches">No upcoming matches found</div>';
       return;
     }
-    const html = this.groups.map(g => this.renderGroup(g)).join('');
+    const banner = this.renderBanner();
+    const html = (banner ? banner : '') + this.groups.map(g => this.renderGroup(g)).join('');
     container.innerHTML = html;
+  }
+
+  renderBanner() {
+    try {
+      if (!this.fallbackInfo) return '';
+      const dparts = this.formatLocalDateParts(this.fallbackInfo.date);
+      return `<div class="sb-info-banner">No matches today — showing next match day: <strong>${dparts.date}</strong></div>`;
+    } catch { return ''; }
   }
 
   renderGroup(group) {
