@@ -45,6 +45,7 @@ from .services.calibration_service import calibration_service
 from .services.football_data_multi_service import FootballDataMultiService
 from .services.team_branding import get_team_branding
 from .services.week_snapshot_service import WeekSnapshotService
+from shutil import copyfile
 
 # Attempt model load/train at startup for real predictions (can be skipped via env)
 if os.getenv('ML_SKIP_STARTUP_TRAIN', '0') == '1':
@@ -470,6 +471,64 @@ async def _debug_startup_event():
             except asyncio.CancelledError:
                 print('[DEBUG] Keepalive task cancelled')
         _KEEPALIVE_TASK = asyncio.create_task(_keepalive())
+
+    # First-boot hydration: if the persistent data volume is empty, copy baked league
+    # caches into /app/data and refresh in-memory services so the site always has
+    # full fixtures available without placeholder fallbacks.
+    try:
+        from pathlib import Path as _P
+        baked_base = _P('/app/baked')
+        data_base = _P('data')
+        data_base.mkdir(parents=True, exist_ok=True)
+        # Map of league codes to data filenames
+        league_files = {
+            'PL': 'football_data_PL_2025_2026.json',
+            'BL1': 'football_data_BL1_2025_2026.json',
+            'FL1': 'football_data_FL1_2025_2026.json',
+            'SA': 'football_data_SA_2025_2026.json',
+            'PD': 'football_data_PD_2025_2026.json',
+        }
+        copied = []
+        for code, fname in league_files.items():
+            dest = data_base / fname
+            if not dest.exists():
+                src = baked_base / fname
+                if src.exists():
+                    try:
+                        copyfile(str(src), str(dest))
+                        copied.append(str(dest))
+                    except Exception as _e:
+                        print(f"[HYDRATE] Copy failed for {fname}: {_e}")
+        if copied:
+            print(f"[HYDRATE] Copied baked league files into data/: {len(copied)}")
+        # Also ensure EPL long-form file path variant exists for v2 service
+        epl_long = data_base / 'football_data_epl_2025_2026.json'
+        if not epl_long.exists():
+            src_long = baked_base / 'football_data_epl_2025_2026.json'
+            if src_long.exists():
+                try:
+                    copyfile(str(src_long), str(epl_long))
+                    print("[HYDRATE] Ensured EPL long-form data file present")
+                except Exception as _e:
+                    print(f"[HYDRATE] Copy failed for EPL long-form: {_e}")
+        # Refresh in-memory services so they pick up the files immediately
+        try:
+            enhanced_epl_service.refresh_data()
+        except Exception:
+            pass
+        try:
+            from .services.league_manager import get_service as _get
+            for code in ['BL1','FL1','SA','PD']:
+                try:
+                    svc = _get(code)
+                    if hasattr(svc, 'refresh_data'):
+                        svc.refresh_data()
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    except Exception as _e:
+        print(f"[HYDRATE] Startup hydration skipped due to error: {_e}")
 
 @app.on_event("shutdown")
 async def _debug_shutdown_event():
