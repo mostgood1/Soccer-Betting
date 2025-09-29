@@ -837,3 +837,15 @@ body {
     letter-spacing: 0.03em;
     opacity: 0.95;
 }
+
+/* All Matches NHL-style compact market rows */
+.sb-market-panel { margin: 8px 0 0; border-top: 1px solid #1f2937; padding-top: 8px; }
+.sb-market-row { display: flex; align-items: center; justify-content: space-between; margin: 6px 0; }
+.sb-market-label { font-size: 0.85rem; color: #9aa4b2; }
+.sb-market-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.sb-market-chip { background: #0b1220; border: 1px solid #1f2937; color: #cbd5e1; padding: 4px 8px; border-radius: 999px; font-size: 0.85rem; }
+.sb-market-chip.home { border-color: #22c55e33; }
+.sb-market-chip.away { border-color: #ef444433; }
+.sb-market-chip.draw { border-color: #f59e0b33; }
+.sb-market-chip.over { border-color: #60a5fa33; }
+.sb-market-chip.under { border-color: #a78bfa33; }

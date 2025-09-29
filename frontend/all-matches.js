@@ -8,10 +8,15 @@ class AllMatchesManager {
     try {
       const url = new URL(window.location.href);
       this.filterLeague = url.searchParams.get('league') || 'ALL';
-      this.daysAhead = parseInt(url.searchParams.get('days') || '14', 10);
+      // All Matches default: current day only (can override via ?days=N)
+      const daysParam = url.searchParams.get('days');
+      this.daysAhead = Number.isFinite(parseInt(daysParam, 10)) ? parseInt(daysParam, 10) : 0;
+      this.daysBack = 0;
+      if (url.searchParams.get('today') === '1') { this.daysAhead = 0; this.daysBack = 0; }
     } catch {
       this.filterLeague = 'ALL';
-      this.daysAhead = 14;
+      this.daysAhead = 0;
+      this.daysBack = 0;
     }
     this.init();
   }
@@ -55,7 +60,8 @@ class AllMatchesManager {
       const qs = [];
       if (this.filterLeague && this.filterLeague !== 'ALL') qs.push(`leagues=${encodeURIComponent(this.filterLeague)}`);
   qs.push(`days_ahead=${encodeURIComponent(this.daysAhead)}`);
-  qs.push(`days_back=7`);
+  qs.push(`days_back=${encodeURIComponent(this.daysBack)}`);
+  // Show completed games from the same day as well (like NHL view)
   qs.push(`include_completed=true`);
       const url = `${this.apiBaseUrl}/api/games/by-date?${qs.join('&')}`;
       const resp = await fetch(url);
@@ -109,9 +115,9 @@ class AllMatchesManager {
   }
 
   getTeamLogo(name) {
-    if (!name) return '/static/placeholder.png';
+    if (!name) return '/placeholder.png';
     const rec = this.brandingAll[name];
-    return (rec && rec.crest) ? rec.crest : '/static/placeholder.png';
+    return (rec && rec.crest) ? rec.crest : '/placeholder.png';
   }
 
   fmtAmerican(odd) {
@@ -158,16 +164,7 @@ class AllMatchesManager {
     const kickoff = m.utc_date || m.date;
     const kp = this.formatLocalDateParts(kickoff);
     const oddsRow = this.getOddsRow(m.league, m.game_week, m.home_team, m.away_team);
-    let oddsText = 'Odds: —';
-    try {
-      if (oddsRow && oddsRow.odds && oddsRow.odds.market_odds) {
-        const mw = oddsRow.odds.market_odds.match_winner || {};
-        const h = this.fmtAmerican(mw.home?.odds_american);
-        const d = this.fmtAmerican(mw.draw?.odds_american);
-        const a = this.fmtAmerican(mw.away?.odds_american);
-        oddsText = `Odds: H ${h} | D ${d} | A ${a}`;
-      }
-    } catch {}
+    const marketsHtml = this.renderMarkets(oddsRow?.odds);
     const leagueBadge = `<span class="sb-chip"><i class="fas fa-flag"></i> ${m.league}</span>`;
     const venue = m.venue || m.stadium || '';
     return `
@@ -178,7 +175,6 @@ class AllMatchesManager {
         </div>
         <div class="sb-meta-bottom">
           ${venue ? `<span class="sb-chip"><i class="fas fa-location-dot"></i> ${venue}</span>` : ''}
-          <span class="sb-chip sb-market-odds">${oddsText}</span>
         </div>
         <div class="sb-match-row">
           <div class="sb-team away vertical">
@@ -191,10 +187,71 @@ class AllMatchesManager {
             <span class="t-name">${m.home_team}</span>
           </div>
         </div>
+        ${marketsHtml}
         <div class="sb-actions">
           <a class="sb-link" href="/?league=${encodeURIComponent(m.league)}&week=${encodeURIComponent(m.game_week)}" title="Open week view">Week ${m.game_week} details</a>
         </div>
       </div>`;
+  }
+
+  renderMarkets(odds) {
+    try {
+      if (!odds || !odds.market_odds) return '';
+      const mo = odds.market_odds;
+      // Moneyline row
+      let ml = '';
+      if (mo.match_winner) {
+        const h = this.fmtAmerican(mo.match_winner.home?.odds_american);
+        const d = this.fmtAmerican(mo.match_winner.draw?.odds_american);
+        const a = this.fmtAmerican(mo.match_winner.away?.odds_american);
+        ml = `
+          <div class="sb-market-row">
+            <div class="sb-market-label">Moneyline</div>
+            <div class="sb-market-chips">
+              <span class="sb-market-chip home">Home ${h}</span>
+              <span class="sb-market-chip draw">Draw ${d}</span>
+              <span class="sb-market-chip away">Away ${a}</span>
+            </div>
+          </div>`;
+      }
+      // Totals row (pick a representative line, prefer 2.5 if available)
+      let tot = '';
+      const totals = Array.isArray(mo.totals) ? mo.totals : [];
+      if (totals.length) {
+        const pick = this.pickTotalsLine(totals);
+        const over = this.fmtAmerican(pick?.over?.odds_american);
+        const under = this.fmtAmerican(pick?.under?.odds_american);
+        const lineTxt = (pick && pick.line != null) ? `${pick.line}` : '';
+        tot = `
+          <div class="sb-market-row">
+            <div class="sb-market-label">Totals ${lineTxt}</div>
+            <div class="sb-market-chips">
+              <span class="sb-market-chip over">Over ${over}</span>
+              <span class="sb-market-chip under">Under ${under}</span>
+            </div>
+          </div>`;
+      }
+      if (!ml && !tot) return '';
+      return `<div class="sb-market-panel">${ml}${tot}</div>`;
+    } catch { return ''; }
+  }
+
+  pickTotalsLine(totals) {
+    try {
+      // Prefer O/U 2.5; else nearest to 2.5; else first entry
+      const target = 2.5;
+      const withLine = totals.filter(t => typeof t.line === 'number');
+      if (!withLine.length) return totals[0];
+      const exact = withLine.find(t => Math.abs(t.line - target) < 1e-9);
+      if (exact) return exact;
+      let best = withLine[0];
+      let bestDiff = Math.abs(best.line - target);
+      for (const t of withLine) {
+        const d = Math.abs(t.line - target);
+        if (d < bestDiff) { best = t; bestDiff = d; }
+      }
+      return best;
+    } catch { return totals[0]; }
   }
 
   setupNavHandlers() {
@@ -204,6 +261,8 @@ class AllMatchesManager {
         sel.addEventListener('change', () => {
           const url = new URL(window.location.href);
           if (sel.value === 'ALL') url.searchParams.delete('league'); else url.searchParams.set('league', sel.value);
+          // Keep All Matches to current day when switching leagues
+          url.searchParams.set('today', '1');
           window.location.href = url.toString();
         });
       }
