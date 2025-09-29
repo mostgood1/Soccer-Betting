@@ -98,7 +98,10 @@ class GameWeekManager {
     async loadGameWeeks() {
         try {
             console.log('🗓️ Loading game weeks...');
-            const response = await fetch(`${this.apiBaseUrl}/api/game-weeks?league=${encodeURIComponent(this.league)}`);
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), 12000);
+            const response = await fetch(`${this.apiBaseUrl}/api/game-weeks?league=${encodeURIComponent(this.league)}`, { signal: controller.signal });
+            clearTimeout(t);
             if (!response.ok) throw new Error('Failed to load game weeks');
             
             const data = await response.json();
@@ -137,7 +140,10 @@ class GameWeekManager {
     async loadWeekDetails(week) {
         try {
             console.log(`📊 Loading details for week ${week}...`);
-            const response = await fetch(`${this.apiBaseUrl}/api/game-weeks/${week}?league=${encodeURIComponent(this.league)}`);
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), 12000);
+            const response = await fetch(`${this.apiBaseUrl}/api/game-weeks/${week}?league=${encodeURIComponent(this.league)}`, { signal: controller.signal });
+            clearTimeout(t);
             if (!response.ok) throw new Error(`Failed to load week ${week} details`);
             
             const data = await response.json();
@@ -152,7 +158,10 @@ class GameWeekManager {
     async loadModelPerformance() {
         try {
             console.log('🤖 Loading model performance...');
-            const response = await fetch(`${this.apiBaseUrl}/api/model-performance`);
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), 12000);
+            const response = await fetch(`${this.apiBaseUrl}/api/model-performance`, { signal: controller.signal });
+            clearTimeout(t);
             if (!response.ok) throw new Error('Failed to load model performance');
             
             const data = await response.json();

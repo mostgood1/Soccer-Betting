@@ -37,7 +37,7 @@ class BettingOddsService:
     
     def __init__(self):
         self.odds_api_key = os.getenv('ODDS_API_KEY')
-        # Cache for odds data and indexes
+        # Cache for odds data and indexes (per-match built structures)
         self.cache: Dict[str, Any] = {}
         self.cache_expiry: Dict[str, datetime] = {}
         # Live odds change often—keep cache short
@@ -183,6 +183,7 @@ class BettingOddsService:
                     pass
         # 3) If still missing and no Bovada match, odds may remain None/empty
 
+        # Persist minimal structure to reduce duplicate provider calls within TTL
         self._cache_odds(cache_key, odds or {})
         return odds or {}
 

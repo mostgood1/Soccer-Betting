@@ -207,9 +207,10 @@ class EnhancedEPLService:
         """Extract comprehensive features for match prediction"""
         try:
             # Get team stats
-            team_stats = self.get_detailed_team_stats()
-            home_stats = next((t for t in team_stats['teams'] if t['name'].lower() == home_team.lower()), None)
-            away_stats = next((t for t in team_stats['teams'] if t['name'].lower() == away_team.lower()), None)
+            team_stats = self.get_detailed_team_stats() or {}
+            teams_list = team_stats.get('teams', []) if isinstance(team_stats, dict) else []
+            home_stats = next((t for t in teams_list if str(t.get('name','')).lower() == home_team.lower()), None)
+            away_stats = next((t for t in teams_list if str(t.get('name','')).lower() == away_team.lower()), None)
             
             if not home_stats or not away_stats:
                 return self._get_fallback_prediction_features()
@@ -282,9 +283,10 @@ class EnhancedEPLService:
             
             # This is a simplified version - in production, you'd query historical H2H data
             # For now, we'll use team averages as proxy
-            team_stats = self.get_detailed_team_stats()
-            home_stats = next((t for t in team_stats['teams'] if t['name'].lower() == home_team.lower()), None)
-            away_stats = next((t for t in team_stats['teams'] if t['name'].lower() == away_team.lower()), None)
+            team_stats = self.get_detailed_team_stats() or {}
+            teams_list = team_stats.get('teams', []) if isinstance(team_stats, dict) else []
+            home_stats = next((t for t in teams_list if str(t.get('name','')).lower() == home_team.lower()), None)
+            away_stats = next((t for t in teams_list if str(t.get('name','')).lower() == away_team.lower()), None)
             
             if not home_stats or not away_stats:
                 return {
@@ -319,9 +321,10 @@ class EnhancedEPLService:
         try:
             # In production, this would query recent match results
             # For now, we'll calculate based on current season stats
-            team_stats = self.get_detailed_team_stats(team_name)
+            team_stats = self.get_detailed_team_stats(team_name) or {}
+            teams_list = team_stats.get('teams', []) if isinstance(team_stats, dict) else []
             
-            if not team_stats['teams']:
+            if not teams_list:
                 return {
                     'form_score': 0.5,
                     'recent_goals_avg': 1.5,
@@ -329,7 +332,7 @@ class EnhancedEPLService:
                     'recent_points': 6
                 }
             
-            team = team_stats['teams'][0]
+            team = teams_list[0]
             
             # Simulate form based on current performance
             form_score = (team['points_per_game'] / 3.0)  # Convert to 0-1 scale
@@ -354,8 +357,9 @@ class EnhancedEPLService:
     def get_betting_odds_data(self) -> Dict:
         """Get current betting market data and predictions"""
         try:
-            team_stats = self.get_detailed_team_stats()
-            top_teams = sorted(team_stats['teams'], key=lambda x: x['points'], reverse=True)[:6]
+            team_stats = self.get_detailed_team_stats() or {}
+            teams_list = team_stats.get('teams', []) if isinstance(team_stats, dict) else []
+            top_teams = sorted(teams_list, key=lambda x: x.get('points', 0), reverse=True)[:6]
             
             return {
                 'title_odds': [
@@ -370,11 +374,11 @@ class EnhancedEPLService:
                 'top_scorer_odds': self.get_top_scorer_predictions(),
                 'relegation_odds': self.get_relegation_predictions(),
                 'market_insights': {
-                    'highest_scoring_team': max(team_stats['teams'], key=lambda x: x['goals_per_game'])['name'],
-                    'best_defense': min(team_stats['teams'], key=lambda x: x['goals_conceded_per_game'])['name'],
-                    'most_consistent': max(team_stats['teams'], key=lambda x: x['scoring_consistency'])['name'],
-                    'league_avg_goals': team_stats['league_averages']['goals_per_game'],
-                    'season_prediction': self._generate_season_prediction(team_stats['teams'])
+                    'highest_scoring_team': max(teams_list, key=lambda x: x.get('goals_per_game', 0))['name'] if teams_list else 'N/A',
+                    'best_defense': min(teams_list, key=lambda x: x.get('goals_conceded_per_game', 999))['name'] if teams_list else 'N/A',
+                    'most_consistent': max(teams_list, key=lambda x: x.get('scoring_consistency', 0))['name'] if teams_list else 'N/A',
+                    'league_avg_goals': (team_stats.get('league_averages', {}) or {}).get('goals_per_game', 2.7) if isinstance(team_stats, dict) else 2.7,
+                    'season_prediction': self._generate_season_prediction(teams_list)
                 }
             }
             
@@ -477,8 +481,9 @@ class EnhancedEPLService:
     def get_relegation_predictions(self) -> List[Dict]:
         """Get relegation battle predictions"""
         try:
-            team_stats = self.get_detailed_team_stats()
-            bottom_teams = sorted(team_stats['teams'], key=lambda x: x['points'])[:8]
+            team_stats = self.get_detailed_team_stats() or {}
+            teams_list = team_stats.get('teams', []) if isinstance(team_stats, dict) else []
+            bottom_teams = sorted(teams_list, key=lambda x: x.get('points', 0))[:8]
             
             relegation_candidates = []
             for team in bottom_teams:

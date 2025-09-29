@@ -114,6 +114,17 @@
                     })();
                 </script>
         <script>
+            // Hide loading overlay once initial HTML/JS is parsed to avoid a stuck screen
+            (function(){
+                const overlay = document.getElementById('loading-overlay');
+                if (overlay) overlay.classList.remove('active');
+                // Show overlay only on catastrophic errors via a simple event hook
+                window.addEventListener('sb-catastrophic-error', ()=>{
+                    if (overlay) overlay.classList.add('active');
+                });
+            })();
+        </script>
+        <script>
             // Apply sportsbook dark theme automatically
             document.addEventListener('DOMContentLoaded', () => {
                 document.body.classList.add('dark-sb');

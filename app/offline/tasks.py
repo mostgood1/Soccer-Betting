@@ -57,7 +57,7 @@ _prediction_cache: Dict[str, Dict[str, Any]] = {}
 # Path to the server's persisted prediction cache so we can reuse identical
 # model probabilities that power the card "Model" section. This prevents
 # confusing mismatches between the card and the compare panels.
-SERVER_PRED_CACHE_PATH = Path("cache/predictions_cache.json")
+SERVER_PRED_CACHE_PATH = Path(os.getenv('PREDICTIONS_CACHE_PATH', 'data/predictions_cache.json'))
 
 def _load_server_prediction_cache() -> Dict[str, Dict[str, Any]]:
     try:
@@ -65,6 +65,12 @@ def _load_server_prediction_cache() -> Dict[str, Dict[str, Any]]:
             data = json.loads(SERVER_PRED_CACHE_PATH.read_text(encoding='utf-8'))
             if isinstance(data, dict):
                 return data  # keyed by f"{match_id}_{home}_{away}" using RAW team names
+        # Backward-compat: also check legacy path under cache/
+        legacy = Path('cache/predictions_cache.json')
+        if legacy.exists():
+            data = json.loads(legacy.read_text(encoding='utf-8'))
+            if isinstance(data, dict):
+                return data
     except Exception:
         pass
     return {}
@@ -291,10 +297,10 @@ def daily_update(
         summary['errors'].append({'retrain': str(e)})
     try:
         rebuild_stats = rebuild_predictions()
-        # persist server prediction cache mirror
+        # persist full server prediction cache so API can reuse without recompute
         try:
-            out_cache = {'generated_at': datetime.utcnow().isoformat(), 'cache_size': len(_prediction_cache), 'keys': list(_prediction_cache.keys())[:5]}
-            SERVER_PRED_CACHE_PATH.write_text(json.dumps(out_cache, indent=2), encoding='utf-8')
+            SERVER_PRED_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SERVER_PRED_CACHE_PATH.write_text(json.dumps(_prediction_cache), encoding='utf-8')
         except Exception:
             pass
         step('rebuild_predictions', rebuild_stats)

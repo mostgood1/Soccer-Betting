@@ -17,13 +17,20 @@ class AllMatchesManager {
   }
 
   async init() {
+    // Load static data first so we can render quickly
     await Promise.all([
       this.loadBrandingAll(),
       this.loadGroups()
     ]);
-    await this.loadBatchOdds();
+    // Render immediately; do not block on network odds
     this.render();
     this.setupNavHandlers();
+    // Kick off odds loading in the background; re-render when done
+    this.loadBatchOdds()
+      .then(() => {
+        try { this.render(); } catch (_) {}
+      })
+      .catch(() => {/* ignore odds failures for initial UX */});
   }
 
   async loadBrandingAll() {
@@ -67,7 +74,14 @@ class AllMatchesManager {
 
   async _fetchWeekOdds(league, week) {
     try {
-      const resp = await fetch(`${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=60&league=${encodeURIComponent(league)}`);
+      // Add a fetch timeout to avoid hanging the UI if providers are slow
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(
+        `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=60&league=${encodeURIComponent(league)}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(t);
       if (!resp.ok) throw new Error(`week odds failed ${league}-${week}`);
       const data = await resp.json();
       this.oddsByLeagueWeek[`${league}-${week}`] = data.matches || [];

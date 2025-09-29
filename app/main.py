@@ -75,14 +75,24 @@ _ALLOW_ON_DEMAND_PREDICTIONS = os.getenv('ALLOW_ON_DEMAND_PREDICTIONS', '0') == 
 # Prediction cache (persist across restarts) & helpers
 # -------------------------------------------------------------
 _PREDICTION_CACHE: Dict[str, Any] = {}
-_PREDICTION_CACHE_PATH = Path("cache/predictions_cache.json")
+# Allow overriding the predictions cache path (so we can persist on platforms like Render)
+_PREDICTION_CACHE_PATH = Path(os.getenv('PREDICTIONS_CACHE_PATH', 'data/predictions_cache.json'))
 _PREDICTION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+_LEGACY_CACHE_PATH = Path('cache/predictions_cache.json')
 
 def _load_prediction_cache():
     global _PREDICTION_CACHE
     try:
         if _PREDICTION_CACHE_PATH.exists():
             _PREDICTION_CACHE = json.loads(_PREDICTION_CACHE_PATH.read_text(encoding='utf-8'))
+        # Backward-compat: migrate legacy cache path into the new data/ location
+        elif _LEGACY_CACHE_PATH.exists():
+            try:
+                _PREDICTION_CACHE = json.loads(_LEGACY_CACHE_PATH.read_text(encoding='utf-8'))
+                # Persist to the new location immediately
+                _PREDICTION_CACHE_PATH.write_text(json.dumps(_PREDICTION_CACHE), encoding='utf-8')
+            except Exception:
+                pass
     except Exception as e:
         print(f"[PREDICTION CACHE] Failed to load cache: {e}")
 
@@ -2304,6 +2314,23 @@ async def rebuild_predictions():
     """Rebuild the entire prediction cache (admin utility)."""
     stats = _regenerate_predictions()
     return {"success": True, "rebuild": stats}
+
+@app.post("/api/admin/predictions/load-cache")
+async def api_admin_load_predictions_cache():
+    """Load predictions cache from disk into memory (idempotent)."""
+    before = len(_PREDICTION_CACHE)
+    _load_prediction_cache()
+    after = len(_PREDICTION_CACHE)
+    return {"success": True, "cache_size": after, "loaded": max(0, after - before), "path": str(_PREDICTION_CACHE_PATH)}
+
+@app.post("/api/admin/predictions/save-cache")
+async def api_admin_save_predictions_cache():
+    """Persist current in-memory predictions cache to disk (idempotent)."""
+    try:
+        _save_prediction_cache()
+        return {"success": True, "cache_size": len(_PREDICTION_CACHE), "path": str(_PREDICTION_CACHE_PATH)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Save failed: {e}")
 
 # --------------- Locked week helpers ---------------
 def _lookup_locked_prediction_for_match(week: int, match: Dict[str, Any]) -> Optional[Dict[str, Any]]:
