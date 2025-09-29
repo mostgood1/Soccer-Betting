@@ -160,7 +160,30 @@ def _fetch_bovada_coupon(
             away = _normalize_team(away_name)
             if not (home and away):
                 return None
-            commence = ev.get("startTime") or ev.get("startTimeMillis")
+            # Kickoff time (Bovada may provide seconds or milliseconds). Normalize to ms and ISO8601 UTC.
+            commence_raw = ev.get("startTimeMillis") or ev.get("startTime")
+            start_time_ms: Optional[int] = None
+            utc_date: Optional[str] = None
+            try:
+                if commence_raw is not None:
+                    v = int(commence_raw)
+                    # Heuristic: if looks like seconds, convert to ms
+                    if v < 10**12:
+                        v = v * 1000
+                    start_time_ms = v
+                    try:
+                        from datetime import datetime, timezone
+
+                        utc_date = (
+                            datetime.fromtimestamp(v / 1000, tz=timezone.utc)
+                            .isoformat()
+                            .replace("+00:00", "Z")
+                        )
+                    except Exception:
+                        utc_date = None
+            except Exception:
+                start_time_ms = None
+                utc_date = None
             # Markets reside in displayGroups -> markets -> outcomes
             display_groups = ev.get("displayGroups") or []
             h2h_probs: Optional[Dict[str, float]] = None
@@ -994,6 +1017,11 @@ def _fetch_bovada_coupon(
                 out["corners_handicap"] = corners_handicap
             if cards_totals:
                 out["cards_totals"] = cards_totals
+            # Attach normalized start time fields for downstream filters
+            if start_time_ms is not None:
+                out["start_time_ms"] = start_time_ms
+            if utc_date is not None:
+                out["utc_date"] = utc_date
             return out
 
         for raw_ev in iter_events(arr):

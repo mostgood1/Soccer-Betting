@@ -131,16 +131,41 @@ class BettingOddsService:
         """
         out = {}
         now = datetime.now()
+        # Only keep events in the next N days for soccer
+        try:
+            window_days = int(os.getenv("BOVADA_WINDOW_DAYS", "7"))
+            if window_days < 0:
+                window_days = 7
+        except Exception:
+            window_days = 7
+        window_end = now + timedelta(days=window_days)
+
+        def _in_window(ev: Dict[str, Any]) -> bool:
+            ts = ev.get("start_time_ms")
+            if not isinstance(ts, int):
+                return False
+            try:
+                ev_dt = datetime.fromtimestamp(ts / 1000)
+                return now <= ev_dt <= window_end
+            except Exception:
+                return False
 
         def _do(key: str, fetcher):
             try:
                 snap = fetcher()
                 if isinstance(snap, dict) and "events" in snap:
-                    self._bovada_cache[key] = snap
+                    # Filter events to window
+                    evs = list(snap.get("events") or [])
+                    filtered = [e for e in evs if _in_window(e)] if evs else []
+                    # If filter eliminates all due to missing times, keep original list (avoid hiding data)
+                    if not filtered and evs:
+                        filtered = evs
+                    snap_f = {**snap, "events": filtered}
+                    self._bovada_cache[key] = snap_f
                     self._bovada_cache_expiry[key] = now + timedelta(
                         seconds=self.cache_duration
                     )
-                    out[key] = len(snap.get("events") or [])
+                    out[key] = len(filtered or [])
                 else:
                     out[key] = 0
             except Exception as e:
