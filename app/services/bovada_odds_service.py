@@ -109,26 +109,41 @@ def _fetch_bovada_coupon(
     ]
     bases = [primary] + [b for b in alt_list if b != primary]
     timeout = timeout or int(os.getenv("BOVADA_TIMEOUT", "12"))
-    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0 (OddsFetcher)"}
+    headers = {
+        "Accept": "application/json,text/plain,*/*",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+    }
     last_err: Dict[str, Any] = {}
     for base in bases:
-        url = (
-            base.rstrip("/")
-            + "/services/sports/event/coupon/events/A/description"
-            + url_suffix
-        )
-        try:
-            r = requests.get(url, headers=headers, timeout=timeout)
-            if r.status_code != 200:
-                last_err = {
-                    "error": f"status {r.status_code}",
-                    "body": r.text[:400],
-                    "base": base,
-                }
+        # Try both coupon groups (A/B) as Bovada sometimes switches group
+        arr = None
+        for grp in ("A", "B"):
+            url = (
+                base.rstrip("/")
+                + f"/services/sports/event/coupon/events/{grp}/description"
+                + url_suffix
+            )
+            try:
+                r = requests.get(url, headers=headers, timeout=timeout)
+                if r.status_code != 200:
+                    last_err = {
+                        "error": f"status {r.status_code}",
+                        "body": r.text[:400],
+                        "base": base,
+                        "group": grp,
+                    }
+                    continue
+                arr = r.json()
+                break
+            except Exception as e:  # pragma: no cover
+                last_err = {"error": str(e), "base": base, "group": grp}
                 continue
-            arr = r.json()
-        except Exception as e:  # pragma: no cover
-            last_err = {"error": str(e), "base": base}
+        if arr is None:
             continue
         events_out: List[Dict[str, Any]] = []
 
@@ -989,7 +1004,8 @@ def _fetch_bovada_coupon(
             out: Dict[str, Any] = {
                 "home_team": home,
                 "away_team": away,
-                "commence_time": commence,
+                # seconds epoch for backward compatibility
+                "commence_time": int(start_time_ms / 1000) if start_time_ms else None,
             }
             if h2h_probs:
                 out["h2h"] = h2h_probs
@@ -1058,7 +1074,14 @@ def _fetch_bovada_multi(
 
 def fetch_pl_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
     """Premier League (England)"""
-    return _fetch_bovada_coupon("/soccer/england/premier-league", timeout=timeout)
+    return _fetch_bovada_multi(
+        [
+            "/soccer/england/premier-league",
+            "/soccer/england/english-premier-league",
+            "/soccer/england/epl",
+        ],
+        timeout=timeout,
+    )
 
 
 def fetch_bl1_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
@@ -1074,14 +1097,34 @@ def fetch_bl1_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
 
 def fetch_fl1_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
     """Ligue 1 (France)"""
-    return _fetch_bovada_coupon("/soccer/france/ligue-1", timeout=timeout)
+    return _fetch_bovada_multi(
+        [
+            "/soccer/france/ligue-1",
+            "/soccer/france/ligue-1-uber-eats",
+        ],
+        timeout=timeout,
+    )
 
 
 def fetch_sa_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
     """Serie A (Italy)"""
-    return _fetch_bovada_coupon("/soccer/italy/serie-a", timeout=timeout)
+    return _fetch_bovada_multi(
+        [
+            "/soccer/italy/serie-a",
+            "/soccer/italy/serie-a-tim",
+        ],
+        timeout=timeout,
+    )
 
 
 def fetch_pd_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
     """La Liga (Spain)"""
-    return _fetch_bovada_coupon("/soccer/spain/la-liga", timeout=timeout)
+    return _fetch_bovada_multi(
+        [
+            "/soccer/spain/la-liga",
+            "/soccer/spain/laliga",
+            "/soccer/spain/la-liga-ea-sports",
+            "/soccer/spain/la-liga-santander",
+        ],
+        timeout=timeout,
+    )
