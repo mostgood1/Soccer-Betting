@@ -89,7 +89,9 @@ def _normalize_probs(values: Dict[str, Optional[float]]) -> Dict[str, float]:
 
 
 def _fetch_bovada_coupon(url_suffix: str, timeout: Optional[int] = None) -> Dict[str, Any]:
-    """Fetch a Bovada coupon by URL suffix and parse to normalized events structure."""
+    """Fetch a Bovada coupon by URL suffix and parse to normalized events structure.
+    Example suffixes: '/soccer/england/premier-league', '/soccer/germany/1-bundesliga'
+    """
     if requests is None:
         return {'error': 'requests not available'}
     base = os.getenv('BOVADA_BASE_URL', 'https://www.bovada.lv')
@@ -585,14 +587,31 @@ def _fetch_bovada_coupon(url_suffix: str, timeout: Optional[int] = None) -> Dict
         return {'error': str(e)}
 
 
+def _fetch_bovada_multi(suffixes: List[str], timeout: Optional[int] = None) -> Dict[str, Any]:
+    """Try multiple Bovada URL suffixes and return the first successful events payload.
+    If all fail or contain no events, return the last response (for error visibility).
+    """
+    last: Dict[str, Any] = {}
+    for suf in suffixes:
+        res = _fetch_bovada_coupon(suf, timeout=timeout)
+        last = res
+        evs = (res or {}).get('events')
+        if isinstance(evs, list) and len(evs) > 0:
+            return res
+    return last or {'events': []}
+
+
 def fetch_pl_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
     """Premier League (England)"""
     return _fetch_bovada_coupon('/soccer/england/premier-league', timeout=timeout)
 
 
 def fetch_bl1_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
-    """Bundesliga (Germany)"""
-    return _fetch_bovada_coupon('/soccer/germany/bundesliga', timeout=timeout)
+    """Bundesliga (Germany): Bovada slug can be '1-bundesliga' or 'bundesliga'. Try both."""
+    return _fetch_bovada_multi([
+        '/soccer/germany/1-bundesliga',
+        '/soccer/germany/bundesliga',
+    ], timeout=timeout)
 
 
 def fetch_fl1_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
