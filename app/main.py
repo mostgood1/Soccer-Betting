@@ -6,7 +6,7 @@ Enhanced with comprehensive data services for EPL 2025-26
 from fastapi import FastAPI, HTTPException, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 import uvicorn
 import os
 import logging
@@ -563,6 +563,27 @@ app.add_middleware(
 # Serve static files
 if os.path.exists("frontend"):
     app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+# Minimal asset endpoints to avoid 404s when assets are missing in the deployed bundle
+@app.get("/placeholder.png")
+def _placeholder_png():
+    """Return a 1x1 transparent PNG as a generic placeholder image."""
+    import base64
+    ONE_BY_ONE_PNG_B64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9XY8VmwAAAAASUVORK5CYII="
+    )
+    data = base64.b64decode(ONE_BY_ONE_PNG_B64)
+    return Response(content=data, media_type="image/png")
+
+@app.get("/favicon.ico")
+def _favicon_ico():
+    """Return a tiny transparent PNG at the favicon path to silence 404s."""
+    import base64
+    ONE_BY_ONE_PNG_B64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9XY8VmwAAAAASUVORK5CYII="
+    )
+    data = base64.b64decode(ONE_BY_ONE_PNG_B64)
+    return Response(content=data, media_type="image/png")
 
 @app.get("/")
 async def serve_homepage(request: Request):
