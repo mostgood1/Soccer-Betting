@@ -29,7 +29,12 @@ COPY . .
 # Also bake a copy of the EPL Football-Data cache outside /app/data so it isn't
 # shadowed by the persistent volume in production (Render mounts /app/data).
 RUN mkdir -p /app/baked \
-    && cp data/football_data_epl_2025_2026.json /app/baked/football_data_epl_2025_2026.json || true
+    && cp data/football_data_epl_2025_2026.json /app/baked/football_data_epl_2025_2026.json || true \
+    && cp data/football_data_PL_2025_2026.json /app/baked/football_data_PL_2025_2026.json || true \
+    && cp data/football_data_BL1_2025_2026.json /app/baked/football_data_BL1_2025_2026.json || true \
+    && cp data/football_data_FL1_2025_2026.json /app/baked/football_data_FL1_2025_2026.json || true \
+    && cp data/football_data_SA_2025_2026.json /app/baked/football_data_SA_2025_2026.json || true \
+    && cp data/football_data_PD_2025_2026.json /app/baked/football_data_PD_2025_2026.json || true
 
 # Expose port (informational)
 EXPOSE 8000

@@ -38,9 +38,11 @@ class EnhancedFDService:
 
     def _load_football_data(self) -> Dict[str, Any]:
         p = self._data_path()
+        baked = f"/app/baked/football_data_{self.code}_2025_2026.json"
         try:
-            if os.path.exists(p):
-                with open(p, 'r', encoding='utf-8') as f:
+            path = p if os.path.exists(p) else baked
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Failed to load Football-Data cache for {self.code}: {e}")
