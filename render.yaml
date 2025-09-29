@@ -22,6 +22,18 @@ services:
       # Avoid bursty recompute in production; rely on snapshots/offline jobs
       - key: ALLOW_ON_DEMAND_PREDICTIONS
         value: "0"
+      # Token to protect cron endpoints (optional but recommended)
+      - key: REFRESH_CRON_TOKEN
+        sync: false
+      # Optional: publish daily summary JSON to GitHub
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: GITHUB_BRANCH
+        value: main
+      - key: GITHUB_PATH_PREFIX
+        value: artifacts/daily_summaries
     disk:
       name: snapshot-data
       mountPath: /app/data
@@ -34,7 +46,16 @@ services:
     cronJobs:
       - name: warm-odds-hourly
         schedule: "0 * * * *"  # hourly on the hour (UTC)
-        command: curl -s -X POST http://localhost:${PORT:-8000}/api/admin/odds/prefetch-bovada && curl -s -X POST http://localhost:${PORT:-8000}/api/admin/edges/warm -H "Content-Type: application/json" -d '{"league":"ALL"}'
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST http://localhost:${PORT:-8000}/api/cron/refresh-bovada -H "Authorization: Bearer $TOKEN"
+      - name: capture-closing-nightly
+        schedule: "20 3 * * *"  # daily at 03:20 UTC (before reconciliation)
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/capture-closing?force=true" -H "Authorization: Bearer $TOKEN"
       - name: overnight-reconciliation
         schedule: "30 3 * * *"  # daily at 03:30 UTC
-        command: curl -s -X POST http://localhost:${PORT:-8000}/api/admin/daily-update
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST http://localhost:${PORT:-8000}/api/cron/daily-update -H "Authorization: Bearer $TOKEN"

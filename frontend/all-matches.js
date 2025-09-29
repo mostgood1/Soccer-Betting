@@ -18,10 +18,15 @@ class AllMatchesManager {
 
   async init() {
     // Load static data first so we can render quickly
-    await Promise.all([
-      this.loadBrandingAll(),
-      this.loadGroups()
-    ]);
+    try {
+      await Promise.all([
+        this.loadBrandingAll(),
+        this.loadGroups()
+      ]);
+    } catch (e) {
+      console.warn('Failed initial loads for AllMatches; proceeding with empty groups', e);
+      if (!Array.isArray(this.groups)) this.groups = [];
+    }
     // Render immediately; do not block on network odds
     this.render();
     this.setupNavHandlers();
@@ -46,14 +51,19 @@ class AllMatchesManager {
   }
 
   async loadGroups() {
-    const qs = [];
-    if (this.filterLeague && this.filterLeague !== 'ALL') qs.push(`leagues=${encodeURIComponent(this.filterLeague)}`);
-    qs.push(`days_ahead=${encodeURIComponent(this.daysAhead)}`);
-    const url = `${this.apiBaseUrl}/api/games/by-date?${qs.join('&')}`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`by-date fetch failed (${resp.status})`);
-    const data = await resp.json();
-    this.groups = Array.isArray(data.groups) ? data.groups : [];
+    try {
+      const qs = [];
+      if (this.filterLeague && this.filterLeague !== 'ALL') qs.push(`leagues=${encodeURIComponent(this.filterLeague)}`);
+      qs.push(`days_ahead=${encodeURIComponent(this.daysAhead)}`);
+      const url = `${this.apiBaseUrl}/api/games/by-date?${qs.join('&')}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`by-date fetch failed (${resp.status})`);
+      const data = await resp.json();
+      this.groups = Array.isArray(data.groups) ? data.groups : [];
+    } catch (e) {
+      console.warn('by-date groups unavailable', e);
+      this.groups = [];
+    }
   }
 
   async loadBatchOdds() {

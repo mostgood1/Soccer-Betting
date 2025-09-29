@@ -3,7 +3,7 @@ Main FastAPI application for Soccer Betting Platform
 Enhanced with comprehensive data services for EPL 2025-26
 """
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -44,6 +44,7 @@ from .services.week_snapshot_service import week_snapshot_service
 from .services.calibration_service import calibration_service
 from .services.football_data_multi_service import FootballDataMultiService
 from .services.team_branding import get_team_branding
+from .services.week_snapshot_service import WeekSnapshotService
 
 # Attempt model load/train at startup for real predictions (can be skipped via env)
 if os.getenv('ML_SKIP_STARTUP_TRAIN', '0') == '1':
@@ -934,6 +935,186 @@ def api_admin_daily_update(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Daily update failed: {e}")
 
+# -------------------------------------------------------------
+# Cron utilities: token-protected endpoints mirroring NHL pattern
+# -------------------------------------------------------------
+_CRON_STATUS_DIR = Path("data/cron"); _CRON_STATUS_DIR.mkdir(parents=True, exist_ok=True)
+
+def _cron_token_ok(token_qs: Optional[str], authorization: Optional[str]) -> bool:
+    try:
+        expected = (os.getenv("REFRESH_CRON_TOKEN", "").strip() or None)
+    except Exception:
+        expected = None
+    if not expected:
+        # If no token configured, allow only local calls (Render cron uses localhost)
+        return True
+    # Prefer Authorization header if present
+    if authorization and isinstance(authorization, str):
+        try:
+            parts = authorization.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1] == expected:
+                return True
+        except Exception:
+            pass
+    # Fallback to token query string
+    return token_qs == expected
+
+def _write_cron_status(name: str, payload: Dict[str, Any]) -> None:
+    try:
+        ts = datetime.utcnow().isoformat() + "Z"
+        out = {"name": name, "timestamp": ts, **payload}
+        p = _CRON_STATUS_DIR / f"{name}.json"
+        p.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+def _gh_upsert_file_if_configured(path: Path, message: str) -> Dict[str, Any]:
+    """Push a file to GitHub if GITHUB_TOKEN and GITHUB_REPO are configured. Best-effort and non-fatal."""
+    try:
+        token = os.getenv("GITHUB_TOKEN", "").strip()
+        repo = os.getenv("GITHUB_REPO", "").strip()  # e.g., mostgood1/soccer-betting
+        if not token or not repo:
+            return {"pushed": False, "reason": "missing token or repo"}
+        branch = os.getenv("GITHUB_BRANCH", "main").strip() or "main"
+        prefix = os.getenv("GITHUB_PATH_PREFIX", "artifacts/daily_summaries").strip()
+        rel_name = path.name
+        repo_path = f"{prefix}/{rel_name}".lstrip("/")
+        import base64
+        import requests
+        with open(path, "rb") as f:
+            content_b64 = base64.b64encode(f.read()).decode("utf-8")
+        base = f"https://api.github.com/repos/{repo}/contents/{repo_path}"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        # Lookup existing file to get sha
+        sha = None
+        try:
+            rget = requests.get(base, headers=headers, params={"ref": branch}, timeout=15)
+            if rget.status_code == 200:
+                sha = rget.json().get("sha")
+        except Exception:
+            sha = None
+        payload = {"message": message, "content": content_b64, "branch": branch}
+        if sha:
+            payload["sha"] = sha
+        rput = requests.put(base, headers=headers, json=payload, timeout=20)
+        ok = rput.status_code in (200, 201)
+        return {"pushed": ok, "status": rput.status_code, "path": repo_path}
+    except Exception as e:
+        return {"pushed": False, "error": str(e)}
+
+@app.post("/api/cron/refresh-bovada")
+def api_cron_refresh_bovada(
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN env var"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token> header (optional)"),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        res = betting_odds_service.prefetch_bovada()
+        _write_cron_status("refresh-bovada", {"result": res})
+        return {"success": True, **res}
+    except Exception as e:
+        _write_cron_status("refresh-bovada", {"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Bovada refresh failed: {e}")
+
+@app.post("/api/cron/daily-update")
+def api_cron_daily_update(
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN env var"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token> header (optional)"),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        out = offline_daily_update()
+        # Write a compact daily summary artifact keyed by ET date
+        try:
+            from datetime import datetime as _dt
+            try:
+                from zoneinfo import ZoneInfo as _Zone
+                et_today = _dt.now(_Zone("America/New_York")).strftime("%Y-%m-%d")
+            except Exception:
+                et_today = _dt.utcnow().strftime("%Y-%m-%d")
+            ds_dir = Path("data/daily_summaries"); ds_dir.mkdir(parents=True, exist_ok=True)
+            snap_cnt = 0
+            try:
+                steps = out.get("steps") or []
+                for s in steps:
+                    if s.get("name") == "odds_snapshot" and s.get("saved"):
+                        snap_cnt += 1
+            except Exception:
+                pass
+            summary = {
+                "date": et_today,
+                "completed_at": out.get("completed_at"),
+                "current_week": out.get("current_week"),
+                "previous_week": out.get("previous_week"),
+                "errors": out.get("errors", []),
+                "steps_count": len(out.get("steps", [])),
+                "odds_snapshots": snap_cnt,
+            }
+            p = ds_dir / f"daily_{et_today}.json"
+            p.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            # Optional: publish to GitHub
+            gh_res = _gh_upsert_file_if_configured(p, message=f"soccer: daily summary for {et_today}")
+        except Exception:
+            gh_res = {"pushed": False}
+        _write_cron_status("daily-update", {"result": out, "published": gh_res})
+        return {"success": True, "result": out, "published": gh_res}
+    except Exception as e:
+        _write_cron_status("daily-update", {"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Daily update failed: {e}")
+
+@app.post("/api/cron/capture-closing")
+def api_cron_capture_closing(
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN env var"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token> header (optional)"),
+    week: Optional[int] = Query(None, ge=1, le=38, description="Optional week override; defaults to current week"),
+    force: bool = Query(True, description="Force regenerate closing snapshot if exists"),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        ws = WeekSnapshotService()
+        if not week:
+            try:
+                matches = EnhancedEPLService().get_all_matches()
+                weeks = game_week_service.organize_matches_by_week(matches)
+                week = game_week_service.get_current_game_week()
+                if not week and weeks:
+                    week = max(weeks.keys())
+            except Exception:
+                week = 1
+        res = ws.capture_closing(int(week), force=force)
+        _write_cron_status("capture-closing", {"week": week, "result": res})
+        return {"success": True, "week": week, "result": res}
+    except Exception as e:
+        _write_cron_status("capture-closing", {"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Capture closing failed: {e}")
+
+@app.get("/api/admin/status/cron-summary")
+def api_admin_cron_summary():
+    """Return timestamps and brief summaries for last cron runs."""
+    out: Dict[str, Any] = {}
+    try:
+        for name in ("refresh-bovada", "daily-update", "capture-closing"):
+            p = _CRON_STATUS_DIR / f"{name}.json"
+            if p.exists():
+                try:
+                    out[name] = json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    out[name] = {"error": "failed to read"}
+            else:
+                out[name] = None
+    except Exception:
+        pass
+    # Also include a quick cron config check
+    try:
+        cron_ok = bool(os.getenv("REFRESH_CRON_TOKEN", "").strip())
+    except Exception:
+        cron_ok = False
+    out["cron_token_configured"] = cron_ok
+    return out
+
 @app.get("/api/betting/value-bets")
 async def get_value_betting_opportunities():
     """Get value betting opportunities across upcoming matches"""
@@ -1352,12 +1533,26 @@ async def api_games_by_date(
         end_utc = now_utc + timedelta(days=int(days_ahead))
 
         def _parse_dt(s: Optional[str]) -> Optional[datetime]:
+            """Parse ISO string to a timezone-aware UTC datetime.
+            Accepts values with or without timezone. Naive values are assumed UTC.
+            """
             if not s:
                 return None
             try:
-                if s.endswith('Z'):
-                    return datetime.fromisoformat(s.replace('Z', '+00:00'))
-                return datetime.fromisoformat(s)
+                dt = None
+                if isinstance(s, str):
+                    if s.endswith('Z'):
+                        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+                    else:
+                        dt = datetime.fromisoformat(s)
+                if dt is None:
+                    return None
+                # Normalize to timezone-aware UTC
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                return dt
             except Exception:
                 return None
 
@@ -1382,6 +1577,7 @@ async def api_games_by_date(
                 dt = _parse_dt(m.get('utc_date') or m.get('date'))
                 if dt is None:
                     continue
+                # Compare aware datetimes in UTC
                 if dt < now_utc or dt > end_utc:
                     # Include only upcoming window; allow completed if flag set and within window
                     if not include_completed:
@@ -1390,7 +1586,8 @@ async def api_games_by_date(
                 is_completed = m.get('is_completed') or status in ['FINISHED', 'COMPLETED']
                 if is_completed and not include_completed:
                     continue
-                day_key = dt.date().isoformat()
+                # Group by UTC calendar date
+                day_key = dt.astimezone(timezone.utc).date().isoformat()
                 buckets.setdefault(day_key, []).append(m)
                 total += 1
 
