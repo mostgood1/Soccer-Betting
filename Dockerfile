@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zlib1g-dev \
         libffi-dev \
         libssl-dev \
+    ca-certificates \
+    curl \
         git \
     && rm -rf /var/lib/apt/lists/*
 
