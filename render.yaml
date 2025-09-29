@@ -28,3 +28,13 @@ services:
       sizeGB: 1
     previews:
       enabled: true
+    
+    
+    # Scheduled jobs: warm odds hourly, run overnight reconciliation daily
+    cronJobs:
+      - name: warm-odds-hourly
+        schedule: "0 * * * *"  # hourly on the hour (UTC)
+        command: curl -s -X POST http://localhost:${PORT:-8000}/api/admin/odds/prefetch-bovada && curl -s -X POST http://localhost:${PORT:-8000}/api/admin/edges/warm -H "Content-Type: application/json" -d '{"league":"ALL"}'
+      - name: overnight-reconciliation
+        schedule: "30 3 * * *"  # daily at 03:30 UTC
+        command: curl -s -X POST http://localhost:${PORT:-8000}/api/admin/daily-update

@@ -37,6 +37,7 @@ from .offline.tasks import compare_week_corners_totals
 from .offline.tasks import consolidated_weeks_report
 from .offline.tasks import compare_week_totals, compare_week_first_half_totals, compare_week_second_half_totals
 from .offline.tasks import compare_week_team_goals_totals, compare_week_team_corners_totals
+from .offline.tasks import daily_update as offline_daily_update
 from .tools.fetch_corners_fbref import import_weeks as import_corners_weeks
 from .services.team_name_normalizer import normalize_team_name
 from .services.week_snapshot_service import week_snapshot_service
@@ -871,6 +872,67 @@ def api_admin_odds_prefetch_bovada():
         return {'success': True, 'result': res}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to prefetch Bovada odds: {e}")
+
+@app.post("/api/admin/edges/warm")
+def api_admin_edges_warm(league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL")):
+    """Warm EV edges/odds caches by fetching odds for current week's matches across leagues.
+    This triggers provider fetches (The Odds API + Bovada) and normalizes data so the UI is fast.
+    """
+    try:
+        leagues = [league] if league and league != 'ALL' else ['PL', 'BL1', 'FL1', 'SA', 'PD']
+        warmed = {}
+        for lg in leagues:
+            try:
+                svc = get_league_service(lg)
+            except Exception:
+                continue
+            matches = svc.get_all_matches() if hasattr(svc, 'get_all_matches') else enhanced_epl_service.get_all_matches()
+            weeks = game_week_service.organize_matches_by_week(matches)
+            current_week = game_week_service.get_current_game_week(league=lg) if hasattr(game_week_service, 'get_current_game_week') else None
+            wk = current_week or max(weeks.keys()) if weeks else None
+            cnt = 0
+            if wk and weeks.get(wk):
+                for m in weeks[wk]:
+                    home = m.get('home_team') or m.get('homeTeam') or (m.get('home') or {}).get('name')
+                    away = m.get('away_team') or m.get('awayTeam') or (m.get('away') or {}).get('name')
+                    if not (home and away):
+                        continue
+                    try:
+                        betting_odds_service.get_match_odds(home, away, m.get('date') or m.get('utc_date'))
+                        cnt += 1
+                    except Exception:
+                        continue
+            warmed[lg] = {'week': wk, 'matches': cnt}
+        return {'success': True, 'warmed': warmed}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to warm edges: {e}")
+
+@app.post("/api/admin/daily-update")
+def api_admin_daily_update(
+    retrain_level: str = Query('patch', description="Model bump level: major/minor/patch"),
+    capture_closing: bool = Query(True),
+    generate_snapshot: bool = Query(True),
+    include_bovada_corners: bool = Query(True),
+    include_odds_api_corners: bool = Query(True),
+    odds_api_regions: str = Query('eu,uk,us'),
+    odds_api_bookmakers: Optional[str] = Query('pinnacle,bet365,williamhill,unibet,betfair_ex'),
+):
+    """Run the offline daily-update workflow inside the server (so artifacts persist to the attached disk).
+    This refreshes schedules, fetches scores, reconciles, calibrates, retrains, rebuilds predictions, and saves a week odds snapshot.
+    """
+    try:
+        out = offline_daily_update(
+            retrain_level=retrain_level,
+            capture_closing=capture_closing,
+            generate_snapshot=generate_snapshot,
+            include_bovada_corners=include_bovada_corners,
+            include_odds_api_corners=include_odds_api_corners,
+            odds_api_regions=odds_api_regions,
+            odds_api_bookmakers=odds_api_bookmakers,
+        )
+        return {'success': True, 'result': out}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Daily update failed: {e}")
 
 @app.get("/api/betting/value-bets")
 async def get_value_betting_opportunities():
