@@ -1144,6 +1144,10 @@ def fetch_sa_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
         [
             "/soccer/italy/serie-a",
             "/soccer/italy/serie-a-tim",
+            # Alternate season branding variants observed
+            "/soccer/italy/serie-a-ea-sports",
+            "/soccer/italy/serie-a-ea-sports-2025-26",
+            "/soccer/italy/serie-a-ea-sports-2024-25",
         ],
         timeout=timeout,
     )
