@@ -488,16 +488,32 @@ class GameWeekManager {
                             </div>`;
                     }
                 } catch {}
-                return `
-                        <div class="game-card sb-card ${statusClass} card" data-game-date="${kickoffIso||''}">
+        // Result classification for completed games (W/L/P) based on reconciliation chips
+        let resultClass = '';
+        try {
+            let w = 0, l = 0, p = 0;
+            if (resCorrect!=null) { if (resCorrect) w++; else l++; }
+            if (goalsCorrect!=null) { if (goalsCorrect) w++; else l++; }
+            if (cornersCorrect!=null) { if (cornersCorrect) w++; else l++; }
+            if (statusClass==='completed') {
+            if (w>0 && l===0) resultClass = 'final-all-win';
+            else if (l>0 && w===0 && p===0) resultClass = 'final-all-loss';
+            else if (w>0 && l>0) resultClass = 'final-mixed';
+            else resultClass = 'final-neutral';
+            }
+        } catch {}
+        const resultBadge = (statusClass==='completed') ? `<div class="result-badge" title="Model vs Actual summary">${resCorrect===true?'W':(resCorrect===false?'L':'')}</div>` : '';
+        return `
+            <div class="game-card sb-card ${statusClass} card ${resultClass}" data-game-date="${kickoffIso||''}">
                                 ${headRow}
                                 ${matchupRow}
                                 ${linesRow}
-                                ${recRow}
+                ${recRow}
                                 <div class="sb-meta-bottom">
                                         <span class="sb-chip" title="Venue"><i class="fas fa-location-dot"></i> ${venue}</span>
                                         <span class="sb-chip" title="Weather"><i class="fas ${weatherIcon.icon} ${weatherIcon.class}"></i> ${weatherIcon.label}</span>
                                         <span class="sb-chip sb-market-odds" data-home="${match.home_team}" data-away="${match.away_team}" title="Market odds (American)">Odds: —</span>
+                    ${resultBadge}
                                 </div>
                                 <div class="sb-split">
                                         <div class="sb-col predictions-col">${predictions ? this.createPredictionSection(predictions, match.home_team, match.away_team) : '<div class="no-predictions">Predictions unavailable</div>'}</div>

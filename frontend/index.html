@@ -137,7 +137,8 @@
                 <span class="cron-label">Last cron:</span>
                 <span id="cron-refresh-bovada">refresh-bovada: —</span> ·
                 <span id="cron-daily-update">daily-update: —</span> ·
-                <span id="cron-capture-closing">capture-closing: —</span>
+                <span id="cron-capture-closing">capture-closing: —</span> ·
+                <span id="cron-snapshot-csv">snapshot-csv: —</span>
             </div>
         </footer>
         <script>
@@ -150,6 +151,7 @@
                         const rb = document.getElementById('cron-refresh-bovada');
                         const du = document.getElementById('cron-daily-update');
                         const cc = document.getElementById('cron-capture-closing');
+                        const sc = document.getElementById('cron-snapshot-csv');
                         const fmt = (obj, name) => {
                             if (!obj) return name + ': —';
                             if (obj.error) return name + ': error';
@@ -159,6 +161,7 @@
                         if (rb) rb.textContent = fmt(data['refresh-bovada'], 'refresh-bovada');
                         if (du) du.textContent = fmt(data['daily-update'], 'daily-update');
                         if (cc) cc.textContent = fmt(data['capture-closing'], 'capture-closing');
+                        if (sc) sc.textContent = fmt(data['snapshot-csv'], 'snapshot-csv');
                     })
                     .catch(()=>{});
             })();

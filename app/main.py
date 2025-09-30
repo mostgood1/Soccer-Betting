@@ -574,7 +574,7 @@ async def _debug_startup_event():
 
         baked_base = _P("/app/baked")
         data_base = _P("data")
-        data_base.mkdir(parents=True, exist_ok=True)
+                # First-boot hydration: if the persistent data volume is empty, copy baked league
         # Map of league codes to data filenames
         league_files = {
             "PL": "football_data_PL_2025_2026.json",
@@ -625,6 +625,67 @@ async def _debug_startup_event():
             pass
     except Exception as _e:
         print(f"[HYDRATE] Startup hydration skipped due to error: {_e}")
+
+    # Non-blocking bootstrap: warm odds and ensure predictions cache exists when
+    # on-demand predictions are disabled in production (e.g., Render). We run this
+    # work in the background so startup stays snappy.
+    async def _bootstrap_after_startup():
+        try:
+            # 1) Prefetch Bovada snapshots so odds exist immediately
+            try:
+                res = betting_odds_service.prefetch_bovada()
+                # Record cron-like status for UI footer/ops
+                try:
+                    _write_cron_status("refresh-bovada", {"result": res, "source": "startup"})
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    _write_cron_status("refresh-bovada", {"error": str(e), "source": "startup"})
+                except Exception:
+                    pass
+            # 2) Ensure prediction cache exists when on-demand compute is disabled
+            try:
+                needs_rebuild = False
+                if not _ALLOW_ON_DEMAND_PREDICTIONS:
+                    # If memory cache empty or file missing/empty, rebuild
+                    if not _PREDICTION_CACHE:
+                        needs_rebuild = True
+                    else:
+                        try:
+                            if (not _PREDICTION_CACHE_PATH.exists()) or _PREDICTION_CACHE_PATH.stat().st_size == 0:
+                                needs_rebuild = True
+                        except Exception:
+                            needs_rebuild = True
+                if needs_rebuild:
+                    # Run heavy work off-thread to avoid blocking event loop
+                    from functools import partial
+
+                    stats = await asyncio.to_thread(_regenerate_predictions)
+                    try:
+                        _write_cron_status("rebuild-predictions", {"result": stats, "source": "startup"})
+                    except Exception:
+                        pass
+                else:
+                    # Still log a no-op so ops dashboard shows intent
+                    try:
+                        _write_cron_status("rebuild-predictions", {"skipped": True, "reason": "cache-present or on-demand-enabled", "source": "startup"})
+                    except Exception:
+                        pass
+            except Exception as e:
+                try:
+                    _write_cron_status("rebuild-predictions", {"error": str(e), "source": "startup"})
+                except Exception:
+                    pass
+        except Exception:
+            # Never let bootstrap failures impact the app
+            pass
+
+    try:
+        asyncio.create_task(_bootstrap_after_startup())
+    except Exception:
+        # If scheduling fails, silently continue without bootstrap
+        pass
 
 
 @app.on_event("shutdown")
