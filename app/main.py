@@ -1608,7 +1608,7 @@ def api_admin_cron_summary():
     """Return timestamps and brief summaries for last cron runs."""
     out: Dict[str, Any] = {}
     try:
-        for name in ("refresh-bovada", "daily-update", "capture-closing", "snapshot-csv"):
+        for name in ("refresh-bovada", "daily-update", "capture-closing", "snapshot-csv", "fetch-scores"):
             p = _CRON_STATUS_DIR / f"{name}.json"
             if p.exists():
                 try:
@@ -4021,6 +4021,44 @@ async def api_week_report(week: int):
         return week_snapshot_service.build_report(week)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Report build failed: {e}")
+
+
+# Admin utility: fetch official final scores for a week and optionally reconcile
+@app.post("/api/admin/weeks/{week}/fetch-scores")
+def api_admin_fetch_scores_for_week(
+    week: int,
+    competition: str = Query("PL", description="Competition code (e.g., PL, BL1, FL1, SA, PD)"),
+    season: int = Query(2025, description="Season year, e.g., 2025 for 2025-26"),
+    auto_reconcile: bool = Query(True, description="If true, reconcile immediately after fetching"),
+    force_repredict: bool = Query(False, description="If true, recompute predictions during reconciliation"),
+):
+    """Fetch final scores from Football-Data.org for a given week and optionally run reconciliation.
+
+    Requires FOOTBALL_DATA_API_TOKEN in the environment. Writes data/manual_results_week{week}.json
+    and updates reconciliation store when auto_reconcile=True.
+    """
+    try:
+        from .offline.tasks import fetch_scores as _fetch_scores
+
+        res = _fetch_scores(
+            competition=competition,
+            season=season,
+            week=week,
+            auto_reconcile=auto_reconcile,
+            force_repredict=force_repredict,
+        )
+        # Record status for ops visibility
+        try:
+            _write_cron_status("fetch-scores", {"week": week, "result": res})
+        except Exception:
+            pass
+        if isinstance(res, dict) and res.get("error"):
+            raise HTTPException(status_code=502, detail=f"Fetch scores failed: {res['error']}")
+        return {"success": True, "week": week, "result": res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/game-weeks/{week}/week-report")
