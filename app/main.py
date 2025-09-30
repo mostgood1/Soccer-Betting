@@ -524,6 +524,60 @@ def _ensure_reconciliations_populated():
         print(f"[RECONCILIATION BACKFILL] Error: {e}")
 
 
+# -------------------------------------------------------------
+# Manual results overlay (for display) 🧩
+# -------------------------------------------------------------
+def _overlay_manual_results_for_weeks(weeks_data: Dict[int, List[Dict[str, Any]]]):
+    """Apply scores from data/manual_results_week{week}.json onto in-memory matches.
+    This makes past matches appear as completed in week endpoints even if the
+    upstream Football-Data cache hasn't been refreshed yet. Idempotent per request.
+    """
+    try:
+        base = Path("data")
+        for wk, items in weeks_data.items():
+            p = base / f"manual_results_week{wk}.json"
+            if not p.exists():
+                continue
+            try:
+                manual_rows = json.loads(p.read_text(encoding="utf-8")) or []
+            except Exception:
+                manual_rows = []
+            if not manual_rows:
+                continue
+            # Build lookup by id and by normalized teams
+            idx_by_id = {}
+            idx_by_pair = {}
+            for m in items:
+                mid = m.get("id") or m.get("match_id")
+                ht = normalize_team_name(m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name"))
+                at = normalize_team_name(m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name"))
+                if mid is not None:
+                    idx_by_id[mid] = m
+                if ht and at:
+                    idx_by_pair[(ht, at)] = m
+            for r in manual_rows:
+                mid = r.get("match_id")
+                ht = normalize_team_name(r.get("home_team") or r.get("home"))
+                at = normalize_team_name(r.get("away_team") or r.get("away"))
+                target = idx_by_id.get(mid) if mid is not None else None
+                if not target and ht and at:
+                    target = idx_by_pair.get((ht, at))
+                if not target:
+                    continue
+                hs = r.get("home_score")
+                as_ = r.get("away_score")
+                # Only apply when both scores present
+                if hs is None or as_ is None:
+                    continue
+                target["home_score"] = hs
+                target["away_score"] = as_
+                target["status"] = "COMPLETED"
+                target["is_completed"] = True
+    except Exception:
+        # Overlay is best-effort; never fail the request
+        pass
+
+
 # Initialize all enhanced services
 # Default EPL service (used when no league specified). Multi-league endpoints will resolve dynamically.
 enhanced_epl_service = EnhancedEPLService()
@@ -2138,6 +2192,8 @@ async def get_game_weeks(
 
         # Organize by weeks
         weeks_data = game_week_service.organize_matches_by_week(matches)
+        # Overlay manual results (if any) to mark finals prior to upstream refresh
+        _overlay_manual_results_for_weeks(weeks_data)
 
         # Re-balance weeks based on matchday if mismatch occurred
         all_matches: List[Dict[str, Any]] = []
@@ -2493,6 +2549,8 @@ async def get_game_week_details(
 
         # Organize by weeks and get specific week
         weeks_data = game_week_service.organize_matches_by_week(matches)
+        # Overlay manual results for this week so finals appear promptly
+        _overlay_manual_results_for_weeks(weeks_data)
         week_matches = weeks_data.get(week, [])
 
         if not week_matches:
