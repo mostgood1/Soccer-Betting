@@ -2550,6 +2550,13 @@ async def get_game_week_details(
     try:
         # Resolve league service
         svc = get_league_service(league)
+        # Normalize a league code string for predictor calibration
+        try:
+            from .services.league_manager import normalize_league_code as _norm_league
+
+            _league_code = _norm_league(league)
+        except Exception:
+            _league_code = "PL"
         # Get all matches
         matches = (
             svc.get_all_matches()
@@ -2626,12 +2633,16 @@ async def get_game_week_details(
                                 pass
                             match["predictions"] = snap_pred
                             _PREDICTION_CACHE[cache_key] = snap_pred
-                    elif _ALLOW_ON_DEMAND_PREDICTIONS and allow_on_demand:
+                    else:
+                        # Build a lightweight prediction for the displayed match.
+                        # We always pass league for correct calibration.
+                        # This is intentionally allowed even when on-demand is globally disabled,
+                        # because it's a small, bounded set (week view) and improves UX for other leagues.
                         pred = _build_normalized_prediction(
-                            home_team, away_team, league=None
+                            home_team, away_team, league=_league_code
                         )
-                        match["predictions"] = pred
                         if pred:
+                            match["predictions"] = pred
                             _PREDICTION_CACHE[cache_key] = pred
                 # Propagate result_prediction to top-level field
                 if match.get("predictions") and (
