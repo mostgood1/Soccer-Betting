@@ -702,6 +702,12 @@ async def _debug_startup_event():
     # on-demand predictions are disabled in production (e.g., Render). We run this
     # work in the background so startup stays snappy.
     async def _bootstrap_after_startup():
+        # In tests/CI, skip heavy bootstrap to avoid long waits and network calls
+        try:
+            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
+                return
+        except Exception:
+            pass
         try:
             # 1) Prefetch Bovada snapshots so odds exist immediately
             try:

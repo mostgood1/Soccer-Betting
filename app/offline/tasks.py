@@ -596,6 +596,9 @@ def rebuild_predictions() -> Dict[str, Any]:
     matches = service.get_all_matches()
     built = 0
     failed = 0
+    # Default to EPL for this legacy sweep
+    from ..services.league_manager import normalize_league_code as _norm
+    code = _norm("PL")
     for m in matches:
         home_raw = m.get("home_team") or m.get("homeTeam")
         away_raw = m.get("away_team") or m.get("awayTeam")
@@ -605,7 +608,8 @@ def rebuild_predictions() -> Dict[str, Any]:
             failed += 1
             continue
         try:
-            raw = advanced_ml_predictor.predict_match(home, away)
+            # Use league-aware features when available
+            raw = advanced_ml_predictor.predict_match(home, away, league=code)
             if not raw:
                 failed += 1
                 continue
@@ -686,6 +690,9 @@ def reconcile_week(
     service = EnhancedEPLService()
     matches = service.get_all_matches()
     weeks = game_week_service.organize_matches_by_week(matches)
+    # This variant operates on EPL data; use PL for league-aware predictor features
+    from ..services.league_manager import normalize_league_code as _norm
+    code = _norm("PL")
     wk_matches = weeks.get(week, [])
     # Build local map for quick match id lookup for manual injection
     match_index = {}
@@ -774,7 +781,7 @@ def reconcile_week(
         need_repredict = force_repredict or not pred
         if need_repredict:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key] = pred
@@ -1012,7 +1019,10 @@ def walkforward_train(
       4) Calibrate model probabilities up to this week
       5) Retrain models and bump version (level)
       6) Rebuild predictions for all matches with the new model
-
+        weeks = game_week_service.organize_matches_by_week(matches)
+        # Normalize league code for predictor calls in this function
+        from ..services.league_manager import normalize_league_code as _norm
+        code = _norm(league)
     Returns a summary with per-week reconciliation stats and model version after each step.
     """
     if start_week > end_week:
@@ -1367,7 +1377,7 @@ def compare_week_odds(
             pred = _prediction_cache.get(key_pred_local)
         if not pred:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key_pred_local] = pred
@@ -1799,7 +1809,8 @@ def compare_week_totals(
         pred = _prediction_cache.get(key_pred)
         if not pred:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                # Pass league to engage league-aware feature builder for non-PL
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key_pred] = pred
@@ -2133,7 +2144,7 @@ def compare_week_first_half_totals(
         pred = _prediction_cache.get(key_pred)
         if not pred:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key_pred] = pred
@@ -2480,7 +2491,7 @@ def compare_week_second_half_totals(
         pred = _prediction_cache.get(key_pred)
         if not pred:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key_pred] = pred
@@ -2722,7 +2733,7 @@ def compare_week_corners_totals(
         pred = _prediction_cache.get(key_pred)
         if not pred:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key_pred] = pred
@@ -2989,7 +3000,7 @@ def compare_week_team_goals_totals(
         pred = _prediction_cache.get(key_pred)
         if not pred:
             try:
-                raw = advanced_ml_predictor.predict_match(home, away)
+                raw = advanced_ml_predictor.predict_match(home, away, league=code)
                 if raw:
                     pred = _normalize_prediction(raw, home, away)
                     _prediction_cache[key_pred] = pred
@@ -3962,6 +3973,9 @@ def _compute_consensus_and_edges(
     import statistics as stats
 
     events = odds_payload.get("events") or []
+    # If caller provided league in payload, normalize it for predictor blending
+    from ..services.league_manager import normalize_league_code as _norm
+    code = _norm(odds_payload.get("league"))
     consensus_list: List[Dict[str, Any]] = []
     edges_list: List[Dict[str, Any]] = []
     pref_env = os.getenv("PREFERRED_BOOKMAKERS", "bet365,draftkings,fanduel,bovada")
@@ -4022,7 +4036,7 @@ def _compute_consensus_and_edges(
         # Model prediction (on-demand) for edge calc
         model_prediction = None
         try:
-            raw = advanced_ml_predictor.predict_match(home, away)
+            raw = advanced_ml_predictor.predict_match(home, away, league=code)
             if raw:
                 model_prediction = _normalize_prediction(raw, home, away)
         except Exception:
@@ -5019,6 +5033,9 @@ def main():
         service = EnhancedEPLService()
         matches = service.get_all_matches()
         weeks = game_week_service.organize_matches_by_week(matches)
+        # default to EPL for this calibration tool
+        from ..services.league_manager import normalize_league_code as _norm
+        code = _norm("PL")
         zs: List[float] = []
         ys: List[int] = []
         used = 0
@@ -5056,7 +5073,7 @@ def main():
                 pred = _prediction_cache.get(key_pred)
                 if not pred:
                     try:
-                        raw = advanced_ml_predictor.predict_match(home, away)
+                        raw = advanced_ml_predictor.predict_match(home, away, league=code)
                         if raw:
                             pred = _normalize_prediction(raw, home, away)
                             _prediction_cache[key_pred] = pred

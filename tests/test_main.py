@@ -1,8 +1,13 @@
+import os
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
+
+# Speed up imports/startup in tests: skip training; avoid on-demand predictions.
+os.environ.setdefault("ML_SKIP_STARTUP_TRAIN", "1")
+os.environ.setdefault("ALLOW_ON_DEMAND_PREDICTIONS", "0")
 
 from app.main import app
 from app.core.database import get_db, Base

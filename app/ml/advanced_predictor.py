@@ -46,6 +46,7 @@ except Exception:  # pragma: no cover
 
 from ..services.expected_goals_service import expected_goals_service
 from ..services.betting_odds_service import betting_odds_service
+from ..services.league_manager import get_service as _get_league_service, normalize_league_code as _norm_league
 
 _BLEND_CONFIG_PATH = os.path.join("cache", "model_blend.json")
 
@@ -618,11 +619,19 @@ class AdvancedMLPredictor:
                 return name.strip()
 
             try:
-                # Prefer v2 deterministic features if available
+                # Prefer v2 deterministic features if available (EPL only)
                 features_data = None
-                if _v2_feature_service is not None:
+                if _v2_feature_service is not None and (
+                    league is None or str(league).upper() == "PL"
+                ):
                     features_data = self._build_v2_features(home_team, away_team)
-                if not features_data:  # fallback to legacy
+                # If league specified and not PL, try league-aware builder
+                if (not features_data) and league is not None:
+                    features_data = self._build_league_features(
+                        home_team, away_team, league
+                    )
+                # Fallback to legacy EPL features
+                if not features_data:
                     features_data = enhanced_epl_service.get_match_prediction_features(
                         home_team, away_team
                     )
@@ -633,13 +642,17 @@ class AdvancedMLPredictor:
                 )
                 if (norm_home, norm_away) != (home_team, away_team):
                     home_team, away_team = norm_home, norm_away
-                    if _v2_feature_service is not None:
+                    if _v2_feature_service is not None and (
+                        league is None or str(league).upper() == "PL"
+                    ):
                         features_data = self._build_v2_features(home_team, away_team)
+                    if (not features_data) and league is not None:
+                        features_data = self._build_league_features(
+                            home_team, away_team, league
+                        )
                     if not features_data:
-                        features_data = (
-                            enhanced_epl_service.get_match_prediction_features(
-                                home_team, away_team
-                            )
+                        features_data = enhanced_epl_service.get_match_prediction_features(
+                            home_team, away_team
                         )
                 else:
                     raise
@@ -1274,6 +1287,161 @@ class AdvancedMLPredictor:
                 "finishing_gap": round(home_finishing - away_finishing, 4),
                 "pair_variance": round(variance_core, 4),
                 "feature_version": f"{TEAM_FEATURE_VERSION}-pair1",
+            }
+            return {"features": features}
+        except Exception:
+            return None
+
+    def _build_league_features(
+        self, home_team: str, away_team: str, league: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """League-aware feature builder.
+        Uses the league manager service to fetch teams for the specified league and
+        constructs v2-style engineered features. Falls back to None if teams not found.
+        """
+        try:
+            code = _norm_league(league)
+            svc = _get_league_service(code)
+            if not hasattr(svc, "get_teams"):
+                return None
+            teams = svc.get_teams() or []
+            if not teams:
+                return None
+
+            # Build simple index and matching similar to v2
+            idx = {t.get("name"): t for t in teams if t.get("name")}
+
+            def _match_team(name: str):
+                if name in idx:
+                    return idx[name]
+                stripped = name.replace(" FC", "").replace(" AFC", "")
+                for tname in idx.keys():
+                    if tname.startswith(stripped) or stripped in tname:
+                        return idx[tname]
+                return None
+
+            h_team = _match_team(home_team)
+            a_team = _match_team(away_team)
+            if not h_team or not a_team:
+                return None
+
+            # Derive PPG-like proxy from position when raw stats aren't available
+            def _ppg_from_position(pos: int) -> float:
+                try:
+                    p = int(pos)
+                except Exception:
+                    p = 10
+                return round(2.4 - (max(1, p) - 1) * (1.6 / 19), 4)
+
+            home_ppg = _ppg_from_position(h_team.get("position", 10))
+            away_ppg = _ppg_from_position(a_team.get("position", 10))
+
+            # Seed metrics may not exist on FD service; default to deterministic based on names
+            def _det_val(tag: str, low: float, high: float) -> float:
+                h = hashlib.sha256(tag.encode()).hexdigest()
+                seed = int(h[:8], 16)
+                rng = random.Random(seed)
+                return round(rng.uniform(low, high), 4)
+
+            h_seed = h_team.get("seed_metrics", {}) or {}
+            a_seed = a_team.get("seed_metrics", {}) or {}
+            home_attack = h_seed.get("attack_rating") or _det_val(
+                f"attack_{h_team.get('name')}", 1.2, 2.4
+            )
+            away_attack = a_seed.get("attack_rating") or _det_val(
+                f"attack_{a_team.get('name')}", 1.2, 2.4
+            )
+            home_def_raw = h_seed.get("defense_rating") or _det_val(
+                f"def_{h_team.get('name')}", 0.6, 1.6
+            )
+            away_def_raw = a_seed.get("defense_rating") or _det_val(
+                f"def_{a_team.get('name')}", 0.6, 1.6
+            )
+            home_def = max(0.2, 2.2 - home_def_raw)
+            away_def = max(0.2, 2.2 - away_def_raw)
+            home_form = h_seed.get("form_score") or _det_val(
+                f"form_{h_team.get('name')}", 0.45, 0.85
+            )
+            away_form = a_seed.get("form_score") or _det_val(
+                f"form_{a_team.get('name')}", 0.45, 0.85
+            )
+            home_finishing = h_seed.get("finishing_quality", 1.0)
+            away_finishing = a_seed.get("finishing_quality", 1.0)
+            home_creation = h_seed.get("chance_creation", 1.0)
+            away_creation = a_seed.get("chance_creation", 1.0)
+            home_tempo = h_seed.get("tempo_factor", 1.0)
+            away_tempo = a_seed.get("tempo_factor", 1.0)
+            home_supp = h_seed.get("suppression_factor", 1.0)
+            away_supp = a_seed.get("suppression_factor", 1.0)
+
+            # Effective attack/defense
+            home_attack_effective = home_attack * home_creation * home_finishing * home_tempo
+            away_attack_effective = away_attack * away_creation * away_finishing * away_tempo
+            home_def_factor = home_def * home_supp
+            away_def_factor = away_def * away_supp
+
+            home_goals_pg = round((home_attack_effective * 0.42) * (away_def_factor * 0.35), 4)
+            away_goals_pg = round((away_attack_effective * 0.42) * (home_def_factor * 0.35), 4)
+            home_concede_pg = round((away_attack_effective * 0.30) / max(home_def_factor, 0.3), 4)
+            away_concede_pg = round((home_attack_effective * 0.30) / max(away_def_factor, 0.3), 4)
+
+            # Pairing variance
+            pair_key = f"{h_team.get('name')}|{a_team.get('name')}|{code}"
+            pair_seed = hashlib.sha256(pair_key.encode()).hexdigest()
+            pair_rng = random.Random(int(pair_seed[:10], 16))
+            variance_core = pair_rng.uniform(-0.12, 0.12)
+            home_shift = 1 + variance_core * 0.6
+            away_shift = 1 - variance_core * 0.4
+            home_micro = 1 + (pair_rng.uniform(-0.025, 0.025))
+            away_micro = 1 + (pair_rng.uniform(-0.025, 0.025))
+            home_goals_pg = round(home_goals_pg * home_shift * home_micro, 4)
+            away_goals_pg = round(away_goals_pg * away_shift * away_micro, 4)
+            home_form = max(0.25, min(0.95, home_form + variance_core * 0.03))
+            away_form = max(0.25, min(0.95, away_form - variance_core * 0.02))
+
+            position_diff = a_team.get("position", 0) - h_team.get("position", 0)
+            strength_disparity = abs(home_ppg - away_ppg)
+            position_diff_factor = position_diff / 10.0
+            strength_disparity *= 1 + abs(position_diff_factor) * 0.05
+            goal_diff_gap = (home_attack - home_def) - (away_attack - away_def)
+            h2h_avg_goals = round(
+                (home_goals_pg + away_goals_pg + home_concede_pg + away_concede_pg) / 2,
+                4,
+            )
+            over_2_5_rate = 0.65 if h2h_avg_goals > 2.6 else 0.45
+            form_gap = home_form - away_form
+            strength_disparity *= 1 + abs(form_gap) * 0.1
+
+            features = {
+                "home_points_per_game": home_ppg,
+                "away_points_per_game": away_ppg,
+                "home_goals_per_game": home_goals_pg,
+                "away_goals_per_game": away_goals_pg,
+                "home_goals_conceded_per_game": home_concede_pg,
+                "away_goals_conceded_per_game": away_concede_pg,
+                "goal_difference_gap": goal_diff_gap,
+                "position_difference": position_diff,
+                "home_win_rate": home_ppg / 3.0,
+                "away_win_rate": away_ppg / 3.0,
+                "home_form_score": home_form,
+                "away_form_score": away_form,
+                "home_recent_goals": home_goals_pg,
+                "away_recent_goals": away_goals_pg,
+                "h2h_home_advantage": 0.15 + (home_form - away_form) * 0.05,
+                "h2h_avg_goals": h2h_avg_goals,
+                "h2h_over_2_5_rate": over_2_5_rate,
+                "home_advantage_multiplier": 1.08 + self._deterministic_value(f"hadv_{h_team.get('name')}", 0.0, 0.07),
+                "is_top_6_clash": (h_team.get("position", 20) <= 6) and (a_team.get("position", 20) <= 6),
+                "is_relegation_battle": (h_team.get("position", 0) >= 15) and (a_team.get("position", 0) >= 15),
+                "strength_disparity": strength_disparity,
+                "attack_matchup_index": round(home_attack_effective / max(away_def_factor, 0.2), 4),
+                "defense_matchup_index": round(home_def_factor / max(away_attack_effective, 0.2), 4),
+                "form_gap": round(form_gap, 4),
+                "tempo_gap": round(home_tempo - away_tempo, 4),
+                "creation_gap": round(home_creation - away_creation, 4),
+                "finishing_gap": round(home_finishing - away_finishing, 4),
+                "pair_variance": round(variance_core, 4),
+                "feature_version": f"{TEAM_FEATURE_VERSION}-league1",
             }
             return {"features": features}
         except Exception:
