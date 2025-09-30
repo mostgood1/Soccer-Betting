@@ -151,8 +151,53 @@ class WeekSnapshotService:
         final_existing = self.load_final(week)
         if final_existing:
             return {"status": "exists", "week": week, "final": final_existing}
-
         matches = self._week_matches(week)
+        # Overlay manual results written by offline.fetch_scores so we can finalize
+        # even if the upstream Football-Data cache hasn't refreshed yet.
+        try:
+            from ..services.team_name_normalizer import normalize_team_name as _norm
+            from pathlib import Path as _P
+            import json as _json
+
+            p = _P("data") / f"manual_results_week{week}.json"
+            if p.exists():
+                manual_rows = []
+                try:
+                    manual_rows = _json.loads(p.read_text(encoding="utf-8")) or []
+                except Exception:
+                    manual_rows = []
+                if manual_rows:
+                    # Build indices into the local matches list
+                    idx_by_id = {}
+                    idx_by_pair = {}
+                    for m in matches:
+                        mid = m.get("id") or m.get("match_id")
+                        ht = _norm(m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name"))
+                        at = _norm(m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name"))
+                        if mid is not None:
+                            idx_by_id[mid] = m
+                        if ht and at:
+                            idx_by_pair[(ht, at)] = m
+                    for r in manual_rows:
+                        mid = r.get("match_id")
+                        ht = _norm(r.get("home_team") or r.get("home"))
+                        at = _norm(r.get("away_team") or r.get("away"))
+                        target = idx_by_id.get(mid) if mid is not None else None
+                        if not target and ht and at:
+                            target = idx_by_pair.get((ht, at))
+                        if not target:
+                            continue
+                        hs = r.get("home_score")
+                        as_ = r.get("away_score")
+                        if hs is None or as_ is None:
+                            continue
+                        target["home_score"] = hs
+                        target["away_score"] = as_
+                        target["status"] = "COMPLETED"
+                        target["is_completed"] = True
+        except Exception:
+            # Best-effort overlay only
+            pass
         index = {(m.get("id") or m.get("match_id")): m for m in matches}
         enriched_rows = []
         completed = 0

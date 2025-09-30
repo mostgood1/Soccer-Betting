@@ -15,6 +15,7 @@ import json
 import random
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+import time
 
 from .services.enhanced_epl_service_v2 import EnhancedEPLService
 from .services.league_manager import (
@@ -100,6 +101,18 @@ _PREDICTION_CACHE_PATH = Path(
 )
 _PREDICTION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 _LEGACY_CACHE_PATH = Path("cache/predictions_cache.json")
+
+# -------------------------------------------------------------
+# Tiny in-memory TTL caches for high-traffic read endpoints
+# -------------------------------------------------------------
+_BY_DATE_CACHE: Dict[str, Dict[str, Any]] = {}
+_BY_DATE_CACHE_TTL = 60.0  # seconds
+
+_BRANDING_ALL_CACHE: Dict[str, Any] = {"payload": None, "ts": 0.0}
+_BRANDING_ALL_CACHE_TTL = 3600.0  # seconds
+
+_WEEK_ODDS_CACHE: Dict[str, Dict[str, Any]] = {}
+_WEEK_ODDS_CACHE_TTL = 60.0  # seconds
 
 
 def _load_prediction_cache():
@@ -1156,6 +1169,12 @@ async def get_week_betting_odds(
     Returns up to `limit` matches with their odds. Odds contain both decimal and American fields.
     """
     try:
+        # TTL cache by league-week-limit combo
+        _key = f"{(league or 'PL').upper()}|{int(week)}|{int(limit)}"
+        _now = time.time()
+        _ent = _WEEK_ODDS_CACHE.get(_key)
+        if _ent and _now - float(_ent.get("ts", 0.0)) < _WEEK_ODDS_CACHE_TTL:
+            return _ent.get("payload")
         # Resolve league service (PL default)
         try:
             svc = get_league_service(league)
@@ -1185,12 +1204,9 @@ async def get_week_betting_odds(
                 continue
             odds = betting_odds_service.get_match_odds(home, away, dt)
             out.append({"home_team": home, "away_team": away, "date": dt, "odds": odds})
-        return {
-            "week": week,
-            "count": len(out),
-            "matches": out,
-            "league": (league or "PL"),
-        }
+        payload = {"week": week, "count": len(out), "matches": out, "league": (league or "PL")}
+        _WEEK_ODDS_CACHE[_key] = {"payload": payload, "ts": _now}
+        return payload
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get week odds: {e}")
 
@@ -1680,6 +1696,25 @@ def api_admin_cron_summary():
         cron_ok = False
     out["cron_token_configured"] = cron_ok
     return out
+
+
+@app.get("/api/admin/status/config")
+def api_admin_config_status():
+    """Expose key configuration bits to help diagnose production issues.
+    Does not reveal secrets; only boolean presence and important flags/paths.
+    """
+    try:
+        cfg = {
+            "football_data_token_configured": bool(os.getenv("FOOTBALL_DATA_API_TOKEN")),
+            "odds_api_key_configured": bool(os.getenv("ODDS_API_KEY")),
+            "cron_token_configured": bool(os.getenv("REFRESH_CRON_TOKEN")),
+            "allow_on_demand_predictions": _ALLOW_ON_DEMAND_PREDICTIONS,
+            "predictions_cache_path": str(_PREDICTION_CACHE_PATH),
+            "ml_skip_startup_train": os.getenv("ML_SKIP_STARTUP_TRAIN", "0") == "1",
+        }
+        return cfg
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Config status failed: {e}")
 
 
 @app.get("/api/admin/status/hydration")
@@ -2402,6 +2437,13 @@ async def api_games_by_date(
     Groups by UTC calendar day of utc_date. Includes upcoming and live by default; optionally completed.
     """
     try:
+        # Small TTL cache to prevent repeated heavy grouping during traffic spikes
+        cache_key = f"{leagues or 'ALL'}|{int(days_ahead)}|{int(days_back)}|{int(include_completed)}"
+        _now = time.time()
+        _cached = _BY_DATE_CACHE.get(cache_key)
+        if _cached and _now - float(_cached.get("ts", 0.0)) < _BY_DATE_CACHE_TTL:
+            return _cached.get("payload")
+
         from datetime import datetime, timezone, timedelta
 
         codes = None
@@ -2486,7 +2528,9 @@ async def api_games_by_date(
             ms.sort(key=lambda x: (x.get("utc_date") or x.get("date") or ""))
             out_groups.append({"date": day, "matches": ms})
 
-        return {"success": True, "groups": out_groups, "leagues": codes, "count": total}
+        payload = {"success": True, "groups": out_groups, "leagues": codes, "count": total}
+        _BY_DATE_CACHE[cache_key] = {"payload": payload, "ts": _now}
+        return payload
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to build by-date feed: {e}"
@@ -4096,6 +4140,15 @@ def api_admin_fetch_scores_for_week(
     and updates reconciliation store when auto_reconcile=True.
     """
     try:
+        # Surface missing token early with a clear message instead of a gateway error
+        if not bool(os.getenv("FOOTBALL_DATA_API_TOKEN")):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "FOOTBALL_DATA_API_TOKEN not configured on this server. "
+                    "Set it in your environment (e.g., Render env vars) to enable fetch-scores."
+                ),
+            )
         from .offline.tasks import fetch_scores as _fetch_scores
 
         res = _fetch_scores(
@@ -4113,6 +4166,24 @@ def api_admin_fetch_scores_for_week(
         if isinstance(res, dict) and res.get("error"):
             raise HTTPException(status_code=502, detail=f"Fetch scores failed: {res['error']}")
         return {"success": True, "week": week, "result": res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/weeks/{week}/manual-results")
+def api_admin_get_manual_results(week: int):
+    """Return the contents of data/manual_results_week{week}.json if present, for diagnostics."""
+    try:
+        p = Path("data") / f"manual_results_week{week}.json"
+        if not p.exists():
+            raise HTTPException(status_code=404, detail="Manual results file not found for this week")
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed reading manual results: {e}")
+        return {"week": week, "count": len(payload) if isinstance(payload, list) else 0, "rows": payload}
     except HTTPException:
         raise
     except Exception as e:
@@ -4732,6 +4803,12 @@ async def api_team_branding(league: str | None = Query(None)):
 @app.get("/api/branding/teams/all")
 async def api_team_branding_all():
     """Return branding (crest + colors) for all supported leagues."""
+    # Cache for 1 hour since this is mostly static data
+    _now = time.time()
+    if _BRANDING_ALL_CACHE.get("payload") and (
+        _now - float(_BRANDING_ALL_CACHE.get("ts", 0.0)) < _BRANDING_ALL_CACHE_TTL
+    ):
+        return _BRANDING_ALL_CACHE["payload"]
 
     # Reuse helpers from api_team_branding via a local scope
     def _tok(s: str) -> str:
@@ -4851,7 +4928,9 @@ async def api_team_branding_all():
                 cur["primary"] = cur.get("primary") or primary
                 cur["secondary"] = cur.get("secondary") or secondary
                 cur["crest"] = cur.get("crest") or crest
-    return {"branding": all_branding, "count": len(all_branding)}
+    payload = {"branding": all_branding, "count": len(all_branding)}
+    _BRANDING_ALL_CACHE.update({"payload": payload, "ts": _now})
+    return payload
 
 
 @app.post("/api/admin/predictions/audit")
