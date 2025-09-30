@@ -19,11 +19,13 @@ import math
 import random
 
 from .betting_odds_service import BettingOddsService
-from .game_week_service import game_week_service
+from .game_week_service import game_week_service, reconciliation_service as model_reconciliation_service
 from .enhanced_epl_service_v2 import EnhancedEPLService
 from .reconciliation_store import reconciliation_store
 from .baseline_prediction_store import baseline_prediction_store
 from ..ml.advanced_predictor import advanced_ml_predictor
+from .league_manager import list_supported as list_supported_leagues, get_service as get_league_service
+from .team_name_normalizer import normalize_team_name
 
 _SNAPSHOT_DIR = Path("data/week_snapshots")
 _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -144,6 +146,7 @@ class WeekSnapshotService:
         retrain: bool = False,
         version_bump: str = "minor",
         edge_threshold: float = 0.05,
+        prob_threshold: float = 0.5,
     ) -> Dict[str, Any]:
         closing = self.load_closing(week)
         if not closing:
@@ -233,7 +236,11 @@ class WeekSnapshotService:
             )
             enriched_rows.append(r)
         # Compute edge analytics before metrics (adds edge fields)
-        self._compute_edge_analytics(enriched_rows, edge_threshold=edge_threshold)
+        self._compute_edge_analytics(
+            enriched_rows,
+            edge_threshold=edge_threshold,
+            prob_threshold=prob_threshold,
+        )
         metrics = self._compute_metrics(enriched_rows)
 
         final_snapshot = {
@@ -274,7 +281,11 @@ class WeekSnapshotService:
         }
 
     def simulate_finalize_week(
-        self, week: int, persist: bool = False, edge_threshold: float = 0.05
+        self,
+        week: int,
+        persist: bool = False,
+        edge_threshold: float = 0.05,
+        prob_threshold: float = 0.5,
     ) -> Dict[str, Any]:
         """Produce a simulated finalization for a week when real scores are not yet available.
         Does NOT overwrite an existing real final snapshot unless persist=True and no real final exists.
@@ -329,7 +340,11 @@ class WeekSnapshotService:
             r["is_completed"] = True
             simulated_rows.append(r)
         # Edge analytics & metrics
-        self._compute_edge_analytics(simulated_rows, edge_threshold=edge_threshold)
+        self._compute_edge_analytics(
+            simulated_rows,
+            edge_threshold=edge_threshold,
+            prob_threshold=prob_threshold,
+        )
         metrics = self._compute_metrics(simulated_rows)
         snapshot = {
             "week": week,
@@ -352,6 +367,87 @@ class WeekSnapshotService:
             "final": snapshot,
             "persisted": persist,
         }
+
+    # --------------- Multi-league utilities ---------------
+    def reconcile_historic_weeks_all_leagues(self, up_to_week: int) -> Dict[str, Any]:
+        """Walk all supported leagues and reconcile completed matches up to a week.
+        Uses current model predictions; writes into reconciliation_store.
+        """
+        leagues = list_supported_leagues()  # returns [{"code": "PL", "name": "..."}, ...]
+        totals = {"matches": 0, "reconciled": 0, "by_league": {}}
+        # Ensure models are loaded
+        try:
+            if not advanced_ml_predictor.is_trained:
+                advanced_ml_predictor.load_models()
+        except Exception:
+            pass
+        for lg in leagues:
+            # Normalize to a league code string
+            code = (lg.get("code") if isinstance(lg, dict) else str(lg)).upper()
+            try:
+                svc = get_league_service(code)
+            except Exception:
+                continue
+            matches = (
+                svc.get_all_matches() if hasattr(svc, "get_all_matches") else self.epl_service.get_all_matches()
+            )
+            weeks = game_week_service.organize_matches_by_week(matches)
+            rec_count = 0
+            considered = 0
+            for w in range(1, int(up_to_week) + 1):
+                for m in weeks.get(w, []):
+                    hs = m.get("home_score") if "home_score" in m else m.get("homeScore")
+                    as_ = m.get("away_score") if "away_score" in m else m.get("awayScore")
+                    status_completed = m.get("status") in ["FINISHED", "COMPLETED"] or m.get("is_completed")
+                    if hs is None or as_ is None or not status_completed:
+                        continue
+                    home = normalize_team_name(m.get("home_team") or m.get("homeTeam"))
+                    away = normalize_team_name(m.get("away_team") or m.get("awayTeam"))
+                    if not (home and away):
+                        continue
+                    try:
+                        raw = advanced_ml_predictor.predict_match(home, away, league=code)
+                        if not raw:
+                            continue
+                        pred = {
+                            "home_goals": float(raw.get("home_goals", 1.2)),
+                            "away_goals": float(raw.get("away_goals", 1.1)),
+                            "total_goals": float(raw.get("total_goals", 2.5)),
+                            "home_win_prob": float(raw.get("home_win_probability", 0.34)),
+                            "draw_prob": float(raw.get("draw_probability", 0.32)),
+                            "away_win_prob": float(raw.get("away_win_probability", 0.34)),
+                        }
+                        rec_match = dict(m)
+                        rec_match["home_score"] = hs
+                        rec_match["away_score"] = as_
+                        rec_match["game_week"] = w
+                        rec_match["league"] = getattr(svc, "code", code)
+                        rec = model_reconciliation_service.reconcile_match_predictions(rec_match, pred)
+                        reconciliation_store.upsert(rec_match, rec)
+                        rec_count += 1
+                        considered += 1
+                    except Exception:
+                        continue
+            totals["by_league"][code] = {"reconciled": rec_count, "considered": considered}
+            totals["reconciled"] += rec_count
+            totals["matches"] += considered
+        reconciliation_store.compute_aggregates()
+        return totals
+
+    def calibrate_all_leagues_up_to_week(self, up_to_week: int) -> Dict[str, Any]:
+        """Fit per-league temperature calibration using completed matches up to week."""
+        from .calibration_service import calibration_service
+
+        out = {"by_league": {}, "up_to_week": int(up_to_week)}
+        for lg in list_supported_leagues():
+            code = (lg.get("code") if isinstance(lg, dict) else str(lg)).upper()
+            try:
+                res = calibration_service.calibrate_up_to_week(int(up_to_week), league=code)
+                out["by_league"][code] = res
+            except Exception as e:
+                out["by_league"][code] = {"trained": False, "error": str(e)}
+        out["status"] = calibration_service.status()
+        return out
 
     # --------------- Report ---------------
     def build_report(self, week: int) -> Dict[str, Any]:
@@ -529,7 +625,10 @@ class WeekSnapshotService:
 
     # --------------- Edge Analytics ---------------
     def _compute_edge_analytics(
-        self, rows: List[Dict[str, Any]], edge_threshold: float = 0.05
+        self,
+        rows: List[Dict[str, Any]],
+        edge_threshold: float = 0.05,
+        prob_threshold: float = 0.5,
     ):
         """Annotate rows with edge analytics and aggregate summary fields.
         Adds per row:
@@ -571,13 +670,20 @@ class WeekSnapshotService:
                     }
                 )
             # Choose selection
-            candidates = [
-                d
-                for d in details
-                if d["edge"] is not None
-                and d["edge"] >= edge_threshold
-                and d["decimal_odds"]
-            ]
+            candidates = []
+            for d in details:
+                try:
+                    if (
+                        d["edge"] is not None
+                        and d["edge"] >= edge_threshold
+                        and d["decimal_odds"]
+                        and d.get("model_prob") is not None
+                        and float(d.get("model_prob")) >= float(prob_threshold)
+                    ):
+                        candidates.append(d)
+                except Exception:
+                    # Be conservative: skip invalid rows rather than failing the whole week
+                    continue
             selection = None
             if candidates:
                 selection = max(candidates, key=lambda x: x["edge"])
@@ -598,6 +704,7 @@ class WeekSnapshotService:
                 r["edge_selection"] = None
         agg = {
             "edge_threshold": edge_threshold,
+            "prob_threshold": prob_threshold,
             "bets_placed": total_selected,
             "avg_edge": (total_edge_sum / total_selected) if total_selected else None,
             "expected_roi_sum": expected_roi_sum if selection_count else None,

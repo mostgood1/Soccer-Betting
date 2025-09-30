@@ -3066,6 +3066,12 @@ def api_odds_compare_week(
         False,
         description="If true, include live Odds API fetch (slower). Default false for speed",
     ),
+    prob_threshold: float = Query(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum model probability for a pick to count as an edge (pick-gating)",
+    ),
 ):
     """Expose model vs historic market consensus comparison for a given week.
     Wraps offline compare_week_odds logic so frontend can render edges.
@@ -3075,13 +3081,17 @@ def api_odds_compare_week(
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
-        _key = f"odds_compare|{code}|{int(week)}|{edge_threshold:.3f}|{bool(use_live)}"
+        _key = f"odds_compare|{code}|{int(week)}|{edge_threshold:.3f}|{float(prob_threshold):.3f}|{bool(use_live)}"
         _now = time.time()
         _ent = _COMPARE_CACHE.get(_key)
         if _ent and _now - float(_ent.get("ts", 0.0)) < _COMPARE_CACHE_TTL:
             return _ent.get("payload")
         data = compare_week_odds(
-            week, edge_threshold=edge_threshold, league=code, use_live=use_live
+            week,
+            edge_threshold=edge_threshold,
+            league=code,
+            use_live=use_live,
+            prob_threshold=prob_threshold,
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -4188,6 +4198,12 @@ async def api_finalize_week(
     retrain: bool = False,
     version_bump: str = Query("minor", regex="^(patch|minor|major)$"),
     edge_threshold: float = Query(0.05, ge=0.0, le=0.5),
+    prob_threshold: float = Query(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum model probability for a pick to count as a bet (pick-gating)",
+    ),
 ):
     """Finalize a week: attach actual scores/results, compute metrics, optionally retrain.
     Retraining blends synthetic base with incremental real rows captured at closing.
@@ -4199,6 +4215,7 @@ async def api_finalize_week(
             retrain=retrain,
             version_bump=version_bump,
             edge_threshold=edge_threshold,
+            prob_threshold=prob_threshold,
         )
         # After finalize, auto-train calibration up to this week
         try:
@@ -4218,6 +4235,12 @@ async def api_simulate_finalize_week(
     week: int,
     persist: bool = False,
     edge_threshold: float = Query(0.05, ge=0.0, le=0.5),
+    prob_threshold: float = Query(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum model probability for a pick to count as a bet (pick-gating)",
+    ),
 ):
     """Produce a simulated final snapshot using sampled outcomes from model probabilities.
     Useful for dry-run validation of reporting and retraining pipeline before real scores available.
@@ -4225,7 +4248,10 @@ async def api_simulate_finalize_week(
     """
     try:
         result = week_snapshot_service.simulate_finalize_week(
-            week, persist=persist, edge_threshold=edge_threshold
+            week,
+            persist=persist,
+            edge_threshold=edge_threshold,
+            prob_threshold=prob_threshold,
         )
         return result
     except ValueError as ve:
@@ -4242,6 +4268,41 @@ async def api_week_report(week: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Report build failed: {e}")
 
+@app.get("/api/admin/weeks/{week}/performance-snapshot")
+def api_admin_week_performance_snapshot(week: int):
+    """Compact weekly performance snapshot for dashboards.
+
+    Returns:
+      - thresholds used (edge and probability)
+      - bets_placed, expected_roi_avg/sum from edge analytics
+      - core metrics (accuracy, log_loss, brier)
+    """
+    try:
+        final = week_snapshot_service.load_final(week)
+        if not final:
+            raise HTTPException(status_code=404, detail="No final snapshot for this week")
+        rows = final.get("rows") or []
+        metrics = final.get("metrics") or {}
+        # pull edge aggregate from first row if present
+        edge_agg = None
+        if rows and isinstance(rows[0], dict):
+            edge_agg = rows[0].get("_edge_aggregate")
+        return {
+            "week": week,
+            "thresholds": {
+                "edge_threshold": (edge_agg or {}).get("edge_threshold"),
+                "prob_threshold": (edge_agg or {}).get("prob_threshold"),
+            },
+            "edge_summary": edge_agg,
+            "metrics": metrics,
+            "completed_matches": final.get("completed_matches"),
+            "model_version": final.get("model_version_pre_retrain"),
+            "finalized_at": final.get("finalized_at"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Performance snapshot failed: {e}")
 
 # Admin utility: fetch official final scores for a week and optionally reconcile
 @app.post("/api/admin/weeks/{week}/fetch-scores")

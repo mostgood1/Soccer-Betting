@@ -1131,6 +1131,7 @@ def compare_week_odds(
     edge_threshold: float = 0.05,
     league: Optional[str] = None,
     use_live: Optional[bool] = None,
+    prob_threshold: float = 0.5,
 ) -> Dict[str, Any]:
     """Compare (historic) market consensus odds vs model vs actual outcomes for a game week.
 
@@ -1479,9 +1480,17 @@ def compare_week_odds(
             edge_for_model_pick = round(
                 model_probs[model_pick] - market_probs.get(model_pick, 0.0), 4
             )
+            # pick-gating: require both edge and minimum model probability for the pick
+            try:
+                pick_prob_ok = float(model_probs.get(model_pick, 0.0)) >= float(
+                    prob_threshold
+                )
+            except Exception:
+                pick_prob_ok = False
             edge_recommendation = (
                 edge_for_model_pick is not None
                 and edge_for_model_pick >= edge_threshold
+                and pick_prob_ok
             )
         # Scoring metrics if actual result & both prob sets known
         if actual_result and model_probs and market_probs:
@@ -1608,7 +1617,8 @@ def compare_week_odds(
         "market_brier": (sum(market_brier) / len(market_brier))
         if market_brier
         else None,
-        "edge_threshold": edge_threshold,
+    "edge_threshold": edge_threshold,
+    "prob_threshold": prob_threshold,
         "recommended_edges": recommended_edges,
         "edge_rate": (recommended_edges / len(rows)) if rows else None,
         "pick_alignment_rate": (pick_alignments / len(rows)) if rows else None,

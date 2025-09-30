@@ -61,12 +61,24 @@ class CalibrationService:
                 # Back-compat: load by_league mapping if present
                 m = data.get("by_league")
                 if isinstance(m, dict):
-                    # normalise keys to upper
-                    self.temperatures_by_league = {
-                        str(k).upper(): float(v)
-                        for k, v in m.items()
-                        if isinstance(v, (int, float))
-                    }
+                    # normalise keys to upper and filter to supported league codes
+                    try:
+                        from .league_manager import SUPPORTED as _SUPPORTED
+
+                        valid = {str(k).upper() for k in (_SUPPORTED or {}).keys()}
+                    except Exception:
+                        valid = set()
+                    temp_map = {}
+                    for k, v in m.items():
+                        try:
+                            ku = str(k).upper()
+                            if isinstance(v, (int, float)) and (
+                                not valid or ku in valid
+                            ):
+                                temp_map[ku] = float(v)
+                        except Exception:
+                            continue
+                    self.temperatures_by_league = temp_map
         except Exception:
             self.temperature = None
             self.meta = {}

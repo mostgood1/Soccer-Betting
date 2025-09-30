@@ -105,6 +105,7 @@ class ReconciliationStore:
             or match.get("week"),
             "home_team": match.get("home_team") or match.get("homeTeam"),
             "away_team": match.get("away_team") or match.get("awayTeam"),
+            "league": match.get("league"),
         }
         self.data["reconciliations"][key] = self._sanitize(enriched)
         self._save()
