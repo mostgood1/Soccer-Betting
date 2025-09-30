@@ -28,6 +28,10 @@ from .services.corners_market_service import reload_market_store
 from .services.goals_market_service import reload_goals_market_store
 from .services.historical_epl_service import historical_epl_service
 from .services.betting_odds_service import BettingOddsService
+from .services.odds_csv_store import (
+    append_h2h_from_bovada,
+    append_h2h_from_oddsapi,
+)
 from .services.enhanced_player_stats_service import EnhancedPlayerStatsService
 from .services.enhanced_historical_data_service import EnhancedHistoricalDataService
 from .services.game_week_service import game_week_service, reconciliation_service
@@ -1119,11 +1123,69 @@ def api_admin_odds_prefetch_bovada():
         )
 
 
+@app.post("/api/admin/odds/snapshot-csv")
+def api_admin_odds_snapshot_csv(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    week: Optional[int] = Query(None, description="Optional game week tag to include in CSV"),
+    include_odds_api: bool = Query(True, description="If true, also append The Odds API bookmaker rows (if key set)"),
+    odds_api_bookmakers: Optional[str] = Query(None, description="Comma list to filter Odds API bookmakers for CSV (e.g., bet365,fanduel)"),
+):
+    """Append current provider odds into CSV historics under data/odds_history.
+
+    Writes h2h_{LEAGUE}.csv with one row per bookmaker outcome. Uses Bovada events
+    as primary, and optionally Odds API normalized payload for richer bookmaker coverage.
+    """
+    try:
+        leagues = []
+        if not league or league.upper() == "ALL":
+            leagues = ["PL", "BL1", "FL1", "SA", "PD"]
+        else:
+            leagues = [league.upper()]
+        total_rows = 0
+        # Ensure Bovada snapshots are fresh
+        bov = betting_odds_service.prefetch_bovada()
+        # Append from Bovada cache
+        for lg in leagues:
+            snap = betting_odds_service._bovada_cache.get(lg) or {}
+            events = snap.get("events") or []
+            total_rows += append_h2h_from_bovada(lg, events, week=week)
+        # Optionally, append from The Odds API per-sport snapshots
+        if include_odds_api and betting_odds_service.odds_api_key:
+            # refresh Odds API snapshots
+            betting_odds_service.prefetch()
+            bk_list = (
+                [s.strip() for s in (odds_api_bookmakers or "").split(",") if s.strip()]
+                if odds_api_bookmakers
+                else None
+            )
+            # Map leagues to sport keys used by BettingOddsService
+            sport_map = {
+                "PL": "soccer_epl",
+                "BL1": "soccer_germany_bundesliga",
+                "FL1": "soccer_france_ligue_one",
+                "SA": "soccer_italy_serie_a",
+                "PD": "soccer_spain_la_liga",
+            }
+            for lg in leagues:
+                sport_key = sport_map.get(lg)
+                if not sport_key:
+                    continue
+                payload = betting_odds_service._sport_cache.get(sport_key)
+                if payload:
+                    total_rows += append_h2h_from_oddsapi(lg, payload, week=week, bookmaker_filter=bk_list)
+        return {"success": True, "rows_appended": total_rows, "leagues": leagues}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSV snapshot failed: {e}")
+
+
 @app.post("/api/admin/edges/warm")
 def api_admin_edges_warm(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD) or ALL"
-    )
+    ),
+    fast: bool = Query(
+        False, description="If true, prefer Bovada-only odds to avoid slow fallbacks"
+    ),
 ):
     """Warm EV edges/odds caches by fetching odds for current week's matches across leagues.
     This triggers provider fetches (The Odds API + Bovada) and normalizes data so the UI is fast.
@@ -1144,8 +1206,10 @@ def api_admin_edges_warm(
                 else enhanced_epl_service.get_all_matches()
             )
             weeks = game_week_service.organize_matches_by_week(matches)
+            # Determine current week; our GameWeekService.get_current_game_week()
+            # does not accept a league parameter, so call without args.
             current_week = (
-                game_week_service.get_current_game_week(league=lg)
+                game_week_service.get_current_game_week()
                 if hasattr(game_week_service, "get_current_game_week")
                 else None
             )
@@ -1167,7 +1231,10 @@ def api_admin_edges_warm(
                         continue
                     try:
                         betting_odds_service.get_match_odds(
-                            home, away, m.get("date") or m.get("utc_date")
+                            home,
+                            away,
+                            m.get("date") or m.get("utc_date"),
+                            prefer_bovada_only=fast,
                         )
                         cnt += 1
                     except Exception:
@@ -1631,6 +1698,9 @@ def api_week_betting_edges(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    fast: bool = Query(
+        False, description="If true, prefer Bovada-only odds for speed (skip fallbacks)"
+    ),
 ):
     """Return compact list of betting edges for a given week by comparing model probabilities
     against market implied probabilities from the match winner odds. Edges are entries where
@@ -1681,7 +1751,10 @@ def api_week_betting_edges(
             try:
                 odds = (
                     betting_odds_service.get_match_odds(
-                        home, away, m.get("date") or m.get("utc_date")
+                        home,
+                        away,
+                        m.get("date") or m.get("utc_date"),
+                        prefer_bovada_only=fast,
                     )
                     or {}
                 )
@@ -2664,6 +2737,10 @@ def api_odds_compare_week(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    use_live: bool = Query(
+        False,
+        description="If true, include live Odds API fetch (slower). Default false for speed",
+    ),
 ):
     """Expose model vs historic market consensus comparison for a given week.
     Wraps offline compare_week_odds logic so frontend can render edges.
@@ -2672,7 +2749,9 @@ def api_odds_compare_week(
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
-        data = compare_week_odds(week, edge_threshold=edge_threshold, league=code)
+        data = compare_week_odds(
+            week, edge_threshold=edge_threshold, league=code, use_live=use_live
+        )
         if isinstance(data, dict):
             data["league"] = code
         return data

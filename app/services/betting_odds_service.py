@@ -206,7 +206,11 @@ class BettingOddsService:
         self.cache_expiry[key] = datetime.now() + timedelta(seconds=self.cache_duration)
 
     def get_match_odds(
-        self, home_team: str, away_team: str, match_date: str = None
+        self,
+        home_team: str,
+        away_team: str,
+        match_date: str = None,
+        prefer_bovada_only: bool = False,
     ) -> Dict:
         """Get real betting odds for a specific match.
         Tries Bovada first (primary). If no Bovada event is found, falls back to The Odds API (H2H).
@@ -233,8 +237,8 @@ class BettingOddsService:
             except Exception:
                 odds = None
 
-        # 2) If Bovada missing, fall back to The Odds API (H2H)
-        if not odds:
+        # 2) If Bovada missing, optionally skip external fallback for speed
+        if not odds and not prefer_bovada_only:
             api_odds = self._lookup_the_odds_api(n_home, n_away)
             if not api_odds and (
                 ("manchester" in n_home.lower()) or ("manchester" in n_away.lower())

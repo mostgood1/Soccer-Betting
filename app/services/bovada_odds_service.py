@@ -202,6 +202,8 @@ def _fetch_bovada_coupon(
             # Markets reside in displayGroups -> markets -> outcomes
             display_groups = ev.get("displayGroups") or []
             h2h_probs: Optional[Dict[str, float]] = None
+            h2h_decimals: Dict[str, Optional[float]] = {"H": None, "D": None, "A": None}
+            h2h_american: Dict[str, Optional[int]] = {"H": None, "D": None, "A": None}
             totals_markets: List[Dict[str, Any]] = []
             fh_totals: List[Dict[str, Any]] = []
             sh_totals: List[Dict[str, Any]] = []
@@ -251,18 +253,43 @@ def _fetch_bovada_coupon(
                             imp = _implied_from_decimal(dec)
                             if "draw" in oname:
                                 probs["D"] = imp
+                                h2h_decimals["D"] = dec
+                                try:
+                                    h2h_american["D"] = int(american) if isinstance(american, (int, float)) else None
+                                except Exception:
+                                    h2h_american["D"] = None
                             elif home_name and _normalize_team(
                                 oname
                             ) == _normalize_team(home_name):
                                 probs["H"] = imp
+                                h2h_decimals["H"] = dec
+                                try:
+                                    h2h_american["H"] = int(american) if isinstance(american, (int, float)) else None
+                                except Exception:
+                                    h2h_american["H"] = None
                             elif away_name and _normalize_team(
                                 oname
                             ) == _normalize_team(away_name):
                                 probs["A"] = imp
+                                h2h_decimals["A"] = dec
+                                try:
+                                    h2h_american["A"] = int(american) if isinstance(american, (int, float)) else None
+                                except Exception:
+                                    h2h_american["A"] = None
                             elif "home" in oname:
                                 probs["H"] = imp
+                                h2h_decimals["H"] = dec
+                                try:
+                                    h2h_american["H"] = int(american) if isinstance(american, (int, float)) else None
+                                except Exception:
+                                    h2h_american["H"] = None
                             elif "away" in oname:
                                 probs["A"] = imp
+                                h2h_decimals["A"] = dec
+                                try:
+                                    h2h_american["A"] = int(american) if isinstance(american, (int, float)) else None
+                                except Exception:
+                                    h2h_american["A"] = None
                         h2h_probs = _normalize_probs(probs)
                     # Totals (Full game): look for Over/Under with a handicap/line
                     if ("total" in desc and "half" not in desc) and len(outcomes) >= 2:
@@ -1009,6 +1036,11 @@ def _fetch_bovada_coupon(
             }
             if h2h_probs:
                 out["h2h"] = h2h_probs
+                # include price representations if available
+                if any(v for v in h2h_decimals.values()):
+                    out["h2h_decimal"] = h2h_decimals
+                if any(v for v in h2h_american.values()):
+                    out["h2h_american"] = h2h_american
             if totals_markets:
                 out["totals"] = totals_markets
             if fh_totals:

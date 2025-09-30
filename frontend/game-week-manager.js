@@ -77,6 +77,14 @@ class GameWeekManager {
         return (n > 0 ? '+' : '') + Math.round(n);
     }
 
+    // Convert decimal odds (e.g., 2.50) to American integer (+150)
+    decimalToAmerican(dec) {
+        const d = Number(dec);
+        if (!isFinite(d) || d <= 1) return null;
+        if (d >= 2) return Math.round((d - 1) * 100);
+        return Math.round(-100 / (d - 1));
+    }
+
     // Result pick -> spelled out label using team names
     formatResultPick(pick, homeTeam, awayTeam) {
         const p = (pick || '').toString().toUpperCase();
@@ -401,52 +409,116 @@ class GameWeekManager {
     const edgeBadge = (oddsRow && oddsRow.edge_recommendation) ? `<span class="sb-edge-badge" title="Model edge"><i class=\"fas fa-bolt\"></i><span class=\"edge-val\">${(typeof oddsRow.edge_for_model_pick === 'number') ? oddsRow.edge_for_model_pick.toFixed(2) : ''}</span></span>` : '';
         const kickoffIso = match.utc_date || match.date || null;
         const localParts = this.formatLocalDateParts(kickoffIso);
-        return `
-            <div class="game-card sb-card ${statusClass}">
-                <div class="sb-card-top">
-                    <div class="sb-meta-left">
-                        <span class="sb-date" title="${localParts.long}">${localParts.date} • ${localParts.time}</span>
-                    </div>
-                    <div class="sb-status badge-${statusClass}">${statusText}${edgeBadge}${lockBadge}</div>
-                </div>
-                <div class="sb-meta-bottom">
-                    <span class="sb-chip" title="Venue"><i class="fas fa-location-dot"></i> ${venue}</span>
-                    <span class="sb-chip" title="Weather"><i class="fas ${weatherIcon.icon} ${weatherIcon.class}"></i> ${weatherIcon.label}</span>
-                    <span class="sb-chip sb-market-odds" data-home="${match.home_team}" data-away="${match.away_team}" title="Market odds (American)">Odds: —</span>
-                </div>
-                <div class="sb-match-row">
-                    <div class="sb-team away vertical">
-                        <div class="logo-wrap lg"><img src="${this.getTeamLogo(match.away_team)}" alt="${match.away_team}" /></div>
-                        <span class="t-name">${match.away_team}</span>
-                    </div>
-                    <div class="sb-center">
-                        ${match.is_completed ? `<div class='final-score'>${match.away_score||0}<span class='dash'>-</span>${match.home_score||0}</div>` : '<div class="vs-pill">VS</div>'}
-                    </div>
-                    <div class="sb-team home vertical">
-                        <div class="logo-wrap lg"><img src="${this.getTeamLogo(match.home_team)}" alt="${match.home_team}" /></div>
-                        <span class="t-name">${match.home_team}</span>
-                    </div>
-                </div>
-                <div class="sb-split">
-                    <div class="sb-col predictions-col">${predictions ? this.createPredictionSection(predictions, match.home_team, match.away_team) : '<div class="no-predictions">Predictions unavailable</div>'}</div>
-                    <div class="sb-col odds-col">
-                        <div class="odds-toggle">
-                            <button class="odds-toggle-pill" aria-expanded="false" title="Show expanded markets">Show Expanded Markets</button>
-                        </div>
-                        <div class="odds-panels-row">
-                            ${oddsSection || '<div class="odds-placeholder">Market data pending</div>'}
-                            ${totalsSection}
-                            ${bttsRow ? this.createBTTSComparisonSection(bttsRow) : ''}
-                            ${cornersSection}
-                        </div>
-                        <div class="expanded-markets collapsed">
-                            ${firstHalfSection}
-                            ${secondHalfSection}
-                        </div>
-                    </div>
-                </div>
-                ${reconciliation ? this.createReconciliationSection(reconciliation) : ''}
-            </div>`;
+                // NHL-style head row
+                const headRow = `
+                        <div class="row head">
+                            <div class="game-date js-local-time" title="${localParts.long}">${localParts.date} ${localParts.time}</div>
+                            <div class="venue">${venue}</div>
+                            <div class="state">${statusText}</div>
+                            <div class="period-pill">${match.is_completed ? 'Final' : ''}</div>
+                            <div class="time-left">—</div>
+                        </div>`;
+                // NHL-style matchup row with score blocks
+                const awayScore = match.is_completed ? (match.away_score ?? 0) : '—';
+                const homeScore = match.is_completed ? (match.home_score ?? 0) : '—';
+                const matchupRow = `
+                        <div class="row matchup sb-match-row">
+                            <div class="team side away">
+                                <div class="team-line">
+                                    <img alt="" title="${match.away_team}" src="${this.getTeamLogo(match.away_team)}" class="team-logo" />
+                                    <div class="name">${match.away_team}</div>
+                                </div>
+                                <div class="score-block">
+                                    <div class="live-score js-live-away">${awayScore}</div>
+                                    <div class="sub proj-score">—</div>
+                                </div>
+                            </div>
+                            <div class="vs">${match.is_completed ? '' : 'VS'}</div>
+                            <div class="team side">
+                                <div class="score-block">
+                                    <div class="live-score js-live-home">${homeScore}</div>
+                                    <div class="sub proj-score">—</div>
+                                </div>
+                                <div class="team-line">
+                                    <img alt="" title="${match.home_team}" src="${this.getTeamLogo(match.home_team)}" class="team-logo" />
+                                    <div class="name">${match.home_team}</div>
+                                </div>
+                            </div>
+                        </div>`;
+                // Lines summary row (ML and Total)
+                const linesRow = `
+                        <div class="row details small">
+                            <div class="detail-col">
+                                <div>
+                                    Lines: ML <span class="ml-label">${match.home_team} / ${match.away_team}</span>
+                                    · Total ${totRow && totRow.market_line != null ? Number(totRow.market_line).toFixed(1) : '—'}
+                                </div>
+                            </div>
+                        </div>`;
+                // Recommendation (moneyline) if edge
+                let recRow = '';
+                try {
+                    if (oddsRow && oddsRow.edge_recommendation && oddsRow.model_pick) {
+                        const mp = oddsRow.model_pick;
+                        const label = (mp==='H') ? `${match.home_team} ML` : (mp==='A' ? `${match.away_team} ML` : 'Draw');
+                        const ev = (typeof oddsRow.ev_for_model_pick==='number') ? oddsRow.ev_for_model_pick : (typeof oddsRow.edge_for_model_pick==='number' ? oddsRow.edge_for_model_pick : null);
+                        const bk = oddsRow.ev_bookmaker || '';
+                        let oddsStr = '—';
+                        try {
+                            const dec = oddsRow.preferred_decimals && oddsRow.preferred_decimals[mp];
+                            if (typeof dec==='number') oddsStr = this.fmtAmerican(this.decimalToAmerican ? this.decimalToAmerican(dec) : null);
+                        } catch {}
+                        if (oddsStr==='—') {
+                            try {
+                                const prob = oddsRow.market_probs && oddsRow.market_probs[mp];
+                                if (typeof prob==='number') oddsStr = this.probToMoneyline(prob);
+                            } catch {}
+                        }
+                        const conf = Math.abs(Number(ev||0))>=0.08? 'high' : (Math.abs(Number(ev||0))>=0.05? 'medium' : 'low');
+                        const evTxt = (ev!=null) ? `${ev>0?'+':''}${(ev*100).toFixed(1)}%` : '—';
+                        recRow = `
+                            <div class="row details">
+                                <div class="detail-col">
+                                    <div class="rec-pill ${ev>0?'ok':(ev===0?'push':'bad')}">
+                                        Recommendation: <strong>${label}</strong>
+                                        <span class="rec-conf ${conf}">${conf}</span>
+                                        · EV ${evTxt}${oddsStr!=='—'?` · ${oddsStr}`:''}${bk?` @ ${bk}`:''}
+                                    </div>
+                                </div>
+                            </div>`;
+                    }
+                } catch {}
+                return `
+                        <div class="game-card sb-card ${statusClass} card" data-game-date="${kickoffIso||''}">
+                                ${headRow}
+                                ${matchupRow}
+                                ${linesRow}
+                                ${recRow}
+                                <div class="sb-meta-bottom">
+                                        <span class="sb-chip" title="Venue"><i class="fas fa-location-dot"></i> ${venue}</span>
+                                        <span class="sb-chip" title="Weather"><i class="fas ${weatherIcon.icon} ${weatherIcon.class}"></i> ${weatherIcon.label}</span>
+                                        <span class="sb-chip sb-market-odds" data-home="${match.home_team}" data-away="${match.away_team}" title="Market odds (American)">Odds: —</span>
+                                </div>
+                                <div class="sb-split">
+                                        <div class="sb-col predictions-col">${predictions ? this.createPredictionSection(predictions, match.home_team, match.away_team) : '<div class="no-predictions">Predictions unavailable</div>'}</div>
+                                        <div class="sb-col odds-col">
+                                                <div class="odds-toggle">
+                                                        <button class="odds-toggle-pill" aria-expanded="false" title="Show expanded markets">Show Expanded Markets</button>
+                                                </div>
+                                                <div class="odds-panels-row">
+                                                        ${oddsSection || '<div class="odds-placeholder">Market data pending</div>'}
+                                                        ${totalsSection}
+                                                        ${bttsRow ? this.createBTTSComparisonSection(bttsRow) : ''}
+                                                        ${cornersSection}
+                                                </div>
+                                                <div class="expanded-markets collapsed">
+                                                        ${firstHalfSection}
+                                                        ${secondHalfSection}
+                                                </div>
+                                        </div>
+                                </div>
+                                ${reconciliation ? this.createReconciliationSection(reconciliation) : ''}
+                        </div>`;
     }
 
     // BTTS (Both Teams To Score)

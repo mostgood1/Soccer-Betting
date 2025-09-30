@@ -38,10 +38,17 @@ from ..services.game_week_service import game_week_service, reconciliation_servi
 from ..services.reconciliation_store import reconciliation_store
 from ..services.historic_odds_service import ingest_path as ingest_odds_path
 from ..services.football_data_odds_service import fetch_week_odds
-from ..services.bovada_odds_service import fetch_pl_odds
+from ..services.bovada_odds_service import (
+    fetch_pl_odds,
+    fetch_bl1_odds,
+    fetch_fl1_odds,
+    fetch_sa_odds,
+    fetch_pd_odds,
+)
 from ..services.betting_odds_service import BettingOddsService
 from ..services.calibration_service import calibration_service
 from ..services.odds_api_corners_service import fetch_corners_totals_from_odds_api
+from ..services.odds_csv_store import load_h2h_index_from_csv
 from ..services.corners_market_service import reload_market_store
 
 try:
@@ -82,6 +89,18 @@ def _load_server_prediction_cache() -> Dict[str, Dict[str, Any]]:
     except Exception:
         pass
     return {}
+
+
+# Helper: map league code to Bovada fetcher
+def _get_bovada_fetcher(league_code: str):
+    code = normalize_league_code(league_code)
+    return {
+        "PL": fetch_pl_odds,
+        "BL1": fetch_bl1_odds,
+        "FL1": fetch_fl1_odds,
+        "SA": fetch_sa_odds,
+        "PD": fetch_pd_odds,
+    }.get(code)
 
 
 # ---------------------------------------------------------------------------
@@ -1108,7 +1127,10 @@ def _load_historic_odds_index(
 
 
 def compare_week_odds(
-    week: int, edge_threshold: float = 0.05, league: Optional[str] = None
+    week: int,
+    edge_threshold: float = 0.05,
+    league: Optional[str] = None,
+    use_live: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Compare (historic) market consensus odds vs model vs actual outcomes for a game week.
 
@@ -1135,11 +1157,31 @@ def compare_week_odds(
     weeks = game_week_service.organize_matches_by_week(matches)
     wk_matches = weeks.get(week, [])
     historic_idx = _load_historic_odds_index()
+    # Augment with recent CSV historics when present (last 60 days)
+    try:
+        csv_idx = load_h2h_index_from_csv(code or "PL", days=60, preferred_bookmakers=[s.strip() for s in (os.getenv("PREFERRED_BOOKMAKERS", "bet365,draftkings,fanduel,bovada")).split(",") if s.strip()])
+        # Merge: prefer historic (older, curated) first; fill missing keys with CSV
+        for k, v in (csv_idx or {}).items():
+            if k not in historic_idx:
+                historic_idx[k] = v
+    except Exception:
+        pass
     # Build live odds index from The Odds API (real provider) if available
     live_idx: Dict[str, Dict[str, Any]] = {}
     live_error: Optional[str] = None
+    # Allow disabling live fetch for speed via parameter or env var
+    allow_live: bool = False
     try:
-        if fetch_h2h_odds is not None:
+        if use_live is not None:
+            allow_live = bool(use_live)
+        else:
+            allow_live = (
+                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            )
+    except Exception:
+        allow_live = False
+    try:
+        if allow_live and fetch_h2h_odds is not None:
             # Default to UK/EU/US to maximize bookmaker coverage (can override via env)
             regions = os.getenv("ODDS_API_REGIONS", "uk,eu,us")
             # Map league to Odds API sport key
@@ -1262,9 +1304,9 @@ def compare_week_odds(
             live_error = "unknown"
     # Backup: Bovada odds (best-effort) to fill missing matches
     try:
-        # Bovada backup currently implemented for EPL only
-        if code == "PL":
-            bova = fetch_pl_odds() if fetch_pl_odds is not None else {"events": []}
+        fetcher = _get_bovada_fetcher(code)
+        if fetcher is not None:
+            bova = fetcher() if fetcher is not None else {"events": []}
             b_events = bova.get("events") or []
             for ev in b_events:
                 h = normalize_team_name(ev.get("home_team"))
@@ -1353,6 +1395,8 @@ def compare_week_odds(
         market_probs = None
         overround = None
         market_source = None
+        preferred_decimals = None  # for EV when available from CSV historics
+        ev_bookmaker = None
         if market_rec:
             # Prefer single-bookmaker (Bet365) from historic if present & configured, else consensus
             cons = (
@@ -1379,6 +1423,17 @@ def compare_week_odds(
                 if market_rec.get("preferred_implied")
                 else "historic_consensus"
             )
+            # Capture preferred bookmaker decimals for EV when present from CSV historics
+            try:
+                pd_map = market_rec.get("preferred_decimals")
+                if isinstance(pd_map, dict) and all(k in pd_map for k in ("H", "D", "A")):
+                    preferred_decimals = {
+                        k: float(pd_map.get(k)) if isinstance(pd_map.get(k), (int, float)) else None
+                        for k in ("H", "D", "A")
+                    }
+                    ev_bookmaker = market_rec.get("preferred_bookmaker")
+            except Exception:
+                preferred_decimals = None
         # If still not found, try live real odds index from The Odds API
         if market_probs is None and live_idx:
             rec = None
@@ -1452,6 +1507,32 @@ def compare_week_odds(
                 model_correct += 1
             if market_pick == actual_result:
                 market_correct += 1
+        # EV calculations (requires model probabilities and decimals)
+        ev_outcomes = None
+        ev_for_model_pick = None
+        best_ev_outcome = None
+        best_ev = None
+        if model_probs and isinstance(preferred_decimals, dict):
+            try:
+                ev_map = {}
+                for o in ("H", "D", "A"):
+                    p = model_probs.get(o)
+                    dec = preferred_decimals.get(o) if preferred_decimals else None
+                    if isinstance(p, (int, float)) and isinstance(dec, (int, float)) and dec > 1.0:
+                        ev_map[o] = round(p * dec - 1.0, 4)
+                if ev_map:
+                    ev_outcomes = ev_map
+                    # EV for model's pick when available
+                    if model_pick and model_pick in ev_map:
+                        ev_for_model_pick = ev_map[model_pick]
+                    # Best EV outcome across available prices
+                    best_ev_outcome, best_ev = max(ev_map.items(), key=lambda kv: kv[1])
+            except Exception:
+                ev_outcomes = None
+                ev_for_model_pick = None
+                best_ev_outcome = None
+                best_ev = None
+
         rows.append(
             {
                 "match_id": mid,
@@ -1482,6 +1563,13 @@ def compare_week_odds(
                 "edge_recommendation": edge_recommendation,
                 "market_overround": overround,
                 "market_source": market_source,
+                # EV analytics (when CSV historics had bookmaker decimals)
+                "ev_outcomes": ev_outcomes,
+                "ev_for_model_pick": ev_for_model_pick,
+                "best_ev_outcome": best_ev_outcome,
+                "best_ev": best_ev,
+                "ev_bookmaker": ev_bookmaker,
+                "preferred_decimals": preferred_decimals,
             }
         )
     # Aggregate metrics
@@ -1575,8 +1663,9 @@ def compare_week_totals(
     # Backup live Bovada totals lookup
     bovada_totals: Dict[str, Dict[str, Any]] = {}
     try:
-        if code == "PL":
-            bova = fetch_pl_odds() if fetch_pl_odds is not None else {"events": []}
+        fetcher = _get_bovada_fetcher(code)
+        if fetcher is not None:
+            bova = fetcher() if fetcher is not None else {"events": []}
             for ev in bova.get("events") or []:
                 h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
                 a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
@@ -1717,8 +1806,8 @@ def compare_week_totals(
                 market_rec = historic_idx.get(f"{home}|{away}".lower())
             market_totals = get_totals_from_historic(market_rec) if market_rec else None
             market_source_str = "historic_totals_consensus" if market_totals else None
-        # If no historic, try Bovada totals at matching line (EPL only)
-        if (not market_totals) and date and code == "PL":
+        # If no historic, try Bovada totals at matching line (any league supported by fetcher)
+        if (not market_totals) and date:
             key = f"{home.lower()}|{away.lower()}"
             by_match = bovada_totals.get(key) or {}
             # Support nearest-line tolerance (±0.25) for Bovada totals
@@ -1963,8 +2052,9 @@ def compare_week_first_half_totals(
     # Backup live Bovada first-half totals lookup
     bovada_fh: Dict[str, Dict[float, Dict[str, Any]]] = {}
     try:
-        if code == "PL":
-            bova = fetch_pl_odds() if fetch_pl_odds is not None else {"events": []}
+        fetcher = _get_bovada_fetcher(code)
+        if fetcher is not None:
+            bova = fetcher() if fetcher is not None else {"events": []}
             for ev in bova.get("events") or []:
                 h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
                 a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
@@ -2297,8 +2387,9 @@ def compare_week_second_half_totals(
     # Backup live Bovada second-half totals lookup
     bovada_sh: Dict[str, Dict[float, Dict[str, Any]]] = {}
     try:
-        if code == "PL":
-            bova = fetch_pl_odds() if fetch_pl_odds is not None else {"events": []}
+        fetcher = _get_bovada_fetcher(code)
+        if fetcher is not None:
+            bova = fetcher() if fetcher is not None else {"events": []}
             for ev in bova.get("events") or []:
                 h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
                 a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
@@ -2803,8 +2894,9 @@ def compare_week_team_goals_totals(
     # Backup live Bovada team totals lookup
     bovada_tt: Dict[str, Dict[str, Dict[float, Dict[str, Any]]]] = {}
     try:
-        if code == "PL":
-            bova = fetch_pl_odds() if fetch_pl_odds is not None else {"events": []}
+        fetcher = _get_bovada_fetcher(code)
+        if fetcher is not None:
+            bova = fetcher() if fetcher is not None else {"events": []}
             for ev in bova.get("events") or []:
                 h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
                 a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
@@ -3088,11 +3180,12 @@ def compare_week_team_corners_totals(
     wk_matches = weeks.get(week, [])
     historic_idx = _load_historic_odds_index()
 
-    # Backup live Bovada team-corners lookup by side and line (with tolerance) – EPL only
+    # Backup live Bovada team-corners lookup by side and line (with tolerance)
     bovada_tc: Dict[str, Dict[str, Dict[float, Dict[str, Any]]]] = {}
     try:
-        if code == "PL":
-            bova = fetch_pl_odds() if fetch_pl_odds is not None else {"events": []}
+        fetcher = _get_bovada_fetcher(code)
+        if fetcher is not None:
+            bova = fetcher() if fetcher is not None else {"events": []}
             for ev in bova.get("events") or []:
                 h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
                 a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
