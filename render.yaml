@@ -64,3 +64,8 @@ services:
         command: |
           TOKEN=${REFRESH_CRON_TOKEN:-} ; \
           curl -s -X POST http://localhost:${PORT:-8000}/api/cron/daily-update -H "Authorization: Bearer $TOKEN"
+      - name: auto-tune-blend-weekly
+        schedule: "0 4 * * 1"  # every Monday 04:00 UTC (after nightly jobs)
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST http://localhost:${PORT:-8000}/api/cron/auto-tune-blend -H "Authorization: Bearer $TOKEN"

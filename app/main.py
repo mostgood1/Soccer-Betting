@@ -3,7 +3,7 @@ Main FastAPI application for Soccer Betting Platform
 Enhanced with comprehensive data services for EPL 2025-26
 """
 
-from fastapi import FastAPI, HTTPException, Query, Request, Header
+from fastapi import FastAPI, HTTPException, Query, Request, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -58,6 +58,7 @@ from .offline.tasks import daily_update as offline_daily_update
 from .tools.fetch_corners_fbref import import_weeks as import_corners_weeks
 from .services.team_name_normalizer import normalize_team_name
 from .services.week_snapshot_service import week_snapshot_service
+from .services.reporting_service import compute_model_vs_market_summary
 from .services.calibration_service import calibration_service
 from .services.football_data_multi_service import FootballDataMultiService
 from .services.team_branding import get_team_branding
@@ -113,6 +114,10 @@ _BRANDING_ALL_CACHE_TTL = 3600.0  # seconds
 
 _WEEK_ODDS_CACHE: Dict[str, Dict[str, Any]] = {}
 _WEEK_ODDS_CACHE_TTL = 60.0  # seconds
+
+# Compare endpoints TTL cache (to avoid repeated heavy recompute)
+_COMPARE_CACHE: Dict[str, Dict[str, Any]] = {}
+_COMPARE_CACHE_TTL = 180.0  # seconds
 
 
 def _load_prediction_cache():
@@ -1376,6 +1381,69 @@ def api_cron_snapshot_csv(
         raise HTTPException(status_code=500, detail=f"CSV snapshot failed: {e}")
 
 
+@app.get("/api/admin/blend-config")
+def api_admin_blend_config_get(
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+):
+    """Read cache/model_blend.json so weights can be inspected/edited from the UI."""
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        path = Path("cache/model_blend.json")
+        if not path.exists():
+            return {"success": True, "config": {}, "path": str(path)}
+        return {
+            "success": True,
+            "config": json.loads(path.read_text(encoding="utf-8")),
+            "path": str(path),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read blend config: {e}")
+
+
+@app.put("/api/admin/blend-config")
+def api_admin_blend_config_put(
+    payload: Dict[str, Any] = Body(...),
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+):
+    """Write cache/model_blend.json with the provided object."""
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be a JSON object")
+        path = Path("cache/model_blend.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return {"success": True, "saved": str(path), "config": payload}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write blend config: {e}")
+
+
+@app.post("/api/cron/auto-tune-blend")
+def api_cron_auto_tune_blend(
+    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN"),
+    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+):
+    """Run auto-tuner to select per-league result market-blend weights using reconciled matches and historic market probs."""
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        # Import and run the script's main() directly
+        from scripts.auto_tune_blend import main as _aut
+
+        _aut()
+        path = Path("cache/model_blend.json")
+        cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        _write_cron_status("auto-tune-blend", {"config": cfg})
+        return {"success": True, "config": cfg}
+    except Exception as e:
+        _write_cron_status("auto-tune-blend", {"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Auto-tune failed: {e}")
+
+
 @app.post("/api/admin/edges/warm")
 def api_admin_edges_warm(
     league: Optional[str] = Query(
@@ -1715,6 +1783,20 @@ def api_admin_config_status():
         return cfg
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Config status failed: {e}")
+
+
+@app.get("/api/admin/report/model-vs-market")
+def api_admin_report_model_vs_market(
+    league: Optional[str] = Query(None, description="Specific league code or ALL"),
+    weeks_back: Optional[int] = Query(None, ge=1, le=38),
+):
+    """Aggregate model vs market metrics per league using reconciled matches and historic indices."""
+    leagues = None if (not league or league.upper() == "ALL") else [league.upper()]
+    try:
+        rep = compute_model_vs_market_summary(leagues, weeks_back)
+        return {"success": True, "report": rep}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
 
 
 @app.get("/api/admin/status/hydration")
@@ -2609,6 +2691,10 @@ async def get_game_week_details(
                 status_code=404, detail=f"No matches found for week {week}"
             )
 
+        # Determine lock policy: treat locks as PL-only (other leagues remain unlocked)
+        _base_week_locked = week_snapshot_service.is_week_locked(week)
+        _is_locked_for_league = _base_week_locked if getattr(svc, "code", "PL") == "PL" else False
+
         # Add predictions for each match (robust to bad records)
         enhanced_matches = []
         for match in week_matches:
@@ -2623,8 +2709,8 @@ async def get_game_week_details(
                 if cache_key in _PREDICTION_CACHE:
                     match["predictions"] = _PREDICTION_CACHE[cache_key]
                 else:
-                    # Respect week locking
-                    if week_snapshot_service.is_week_locked(week):
+                    # Respect week locking (PL-only)
+                    if _is_locked_for_league:
                         snap_pred = _lookup_locked_prediction_for_match(week, match)
                         if snap_pred:
                             try:
@@ -2652,9 +2738,7 @@ async def get_game_week_details(
                     if rp:
                         match["result_prediction"] = rp
                 # Attach lock metadata for UI
-                match["is_week_locked"] = (
-                    True if week_snapshot_service.is_week_locked(week) else False
-                )
+                match["is_week_locked"] = bool(_is_locked_for_league)
                 # Optional simulation of scores for completed-but-missing (dev/testing)
                 if (
                     simulate
@@ -2731,7 +2815,7 @@ async def get_game_week_details(
             logger.error(f"Week {week}: failed to compute performance: {perf_err}")
             week_performance = {}
 
-        locked = week_snapshot_service.is_week_locked(week)
+        locked = bool(_is_locked_for_league)
         lock_info = None
         if locked:
             try:
@@ -2987,15 +3071,23 @@ def api_odds_compare_week(
     Wraps offline compare_week_odds logic so frontend can render edges.
     """
     try:
+        # Cache key: endpoint|league|week|threshold|live
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
+        _key = f"odds_compare|{code}|{int(week)}|{edge_threshold:.3f}|{bool(use_live)}"
+        _now = time.time()
+        _ent = _COMPARE_CACHE.get(_key)
+        if _ent and _now - float(_ent.get("ts", 0.0)) < _COMPARE_CACHE_TTL:
+            return _ent.get("payload")
         data = compare_week_odds(
             week, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
-        return data
+        payload = data
+        _COMPARE_CACHE[_key] = {"payload": payload, "ts": _now}
+        return payload
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3021,12 +3113,19 @@ def api_corners_compare_week(
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
+        _key = f"corners_compare|{code}|{int(week)}|{float(line):.2f}|{edge_threshold:.3f}"
+        _now = time.time()
+        _ent = _COMPARE_CACHE.get(_key)
+        if _ent and _now - float(_ent.get("ts", 0.0)) < _COMPARE_CACHE_TTL:
+            return _ent.get("payload")
         data = compare_week_corners_totals(
             week, line=line, edge_threshold=edge_threshold, league=code
         )
         if isinstance(data, dict):
             data["league"] = code
-        return data
+        payload = data
+        _COMPARE_CACHE[_key] = {"payload": payload, "ts": _now}
+        return payload
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3049,12 +3148,19 @@ def api_totals_compare_week(
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
+        _key = f"totals_compare|{code}|{int(week)}|{float(line):.2f}|{edge_threshold:.3f}|{bool(use_live)}"
+        _now = time.time()
+        _ent = _COMPARE_CACHE.get(_key)
+        if _ent and _now - float(_ent.get("ts", 0.0)) < _COMPARE_CACHE_TTL:
+            return _ent.get("payload")
         data = compare_week_totals(
             week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
-        return data
+        payload = data
+        _COMPARE_CACHE[_key] = {"payload": payload, "ts": _now}
+        return payload
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

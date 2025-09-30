@@ -45,6 +45,7 @@ except Exception:  # pragma: no cover
     TEAM_FEATURE_VERSION = "fv0"
 
 from ..services.expected_goals_service import expected_goals_service
+from ..services.betting_odds_service import betting_odds_service
 
 _BLEND_CONFIG_PATH = os.path.join("cache", "model_blend.json")
 
@@ -825,6 +826,61 @@ class AdvancedMLPredictor:
             except Exception:
                 final_probs = smoothed
             final_probs = final_probs / max(1e-12, final_probs.sum())
+
+            # Optional: blend with live market implied probabilities (H2H) if available
+            # Controlled by cache/model_blend.json key 'result_market_weight' or env ML_RESULT_MARKET_WEIGHT
+            try:
+                cfg = cfg or _load_blend_config() or {}
+                try:
+                    w_mkt = None
+                    # Per-league override map takes precedence when league provided
+                    if league and isinstance(cfg.get("result_market_weight_by_league"), dict):
+                        key = str(league).upper()
+                        val = cfg["result_market_weight_by_league"].get(key)
+                        if isinstance(val, (int, float)):
+                            w_mkt = float(val)
+                    if w_mkt is None:
+                        w_mkt = float(
+                            cfg.get(
+                                "result_market_weight",
+                                os.getenv("ML_RESULT_MARKET_WEIGHT", "0.0"),
+                            )
+                        )
+                except Exception:
+                    w_mkt = 0.0
+                if w_mkt and w_mkt > 0.0:
+                    prefer_bovada = (
+                        str(os.getenv("ML_MARKET_BLEND_BOVADA_ONLY", "1")).strip()
+                        in ("1", "true", "True")
+                    )
+                    mkt = betting_odds_service.get_match_odds(
+                        home_team, away_team, match_date=None, prefer_bovada_only=prefer_bovada
+                    )
+                    mw = (mkt or {}).get("market_odds") or {}
+                    h2h = mw.get("match_winner") or {}
+                    ph = (h2h.get("home") or {}).get("probability")
+                    pd = (h2h.get("draw") or {}).get("probability")
+                    pa = (h2h.get("away") or {}).get("probability")
+                    if all(isinstance(v, (int, float)) and v >= 0.0 for v in (ph, pd, pa)):
+                        mkt_vec = np.array([float(pd), float(ph), float(pa)])
+                        s = float(mkt_vec.sum())
+                        if s > 0:
+                            mkt_vec = mkt_vec / s
+                            w_mkt = max(0.0, min(1.0, float(w_mkt)))
+                            final_probs = (1.0 - w_mkt) * final_probs + w_mkt * mkt_vec
+                            final_probs = final_probs / max(1e-12, final_probs.sum())
+                            predictions.setdefault("adjustments", {})["market_blend"] = {
+                                "weight": w_mkt,
+                                "provider": mkt.get("provider"),
+                                "market_probs": {
+                                    "D": float(mkt_vec[0]),
+                                    "H": float(mkt_vec[1]),
+                                    "A": float(mkt_vec[2]),
+                                },
+                            }
+            except Exception as e:
+                predictions.setdefault("adjustments", {})["market_blend_error"] = str(e)
+
             predictions["draw_probability"] = float(final_probs[0])
             predictions["home_win_probability"] = float(final_probs[1])
             predictions["away_win_probability"] = float(final_probs[2])
@@ -908,6 +964,67 @@ class AdvancedMLPredictor:
                 predictions[
                     "over_2_5_goals_probability"
                 ] = self._calculate_over_probability(predictions["total_goals"])
+
+            # Optional: blend Over 2.5 probability with market totals (nearest to 2.5) if available
+            try:
+                cfg2 = _load_blend_config() or {}
+                try:
+                    w_tot = None
+                    if league and isinstance(cfg2.get("totals_market_weight_by_league"), dict):
+                        key = str(league).upper()
+                        val = cfg2["totals_market_weight_by_league"].get(key)
+                        if isinstance(val, (int, float)):
+                            w_tot = float(val)
+                    if w_tot is None:
+                        w_tot = float(
+                            cfg2.get(
+                                "totals_market_weight", os.getenv("ML_TOTALS_MARKET_WEIGHT", "0.0")
+                            )
+                        )
+                except Exception:
+                    w_tot = 0.0
+                if w_tot and w_tot > 0.0:
+                    prefer_bovada = (
+                        str(os.getenv("ML_MARKET_BLEND_BOVADA_ONLY", "1")).strip()
+                        in ("1", "true", "True")
+                    )
+                    mkt2 = betting_odds_service.get_match_odds(
+                        home_team, away_team, match_date=None, prefer_bovada_only=prefer_bovada
+                    )
+                    mo = (mkt2 or {}).get("market_odds") or {}
+                    totals = mo.get("totals") or []
+                    # choose line closest to 2.5, prefer exact 2.5
+                    target = 2.5
+                    chosen = None
+                    best_gap = 1e9
+                    for row in totals:
+                        try:
+                            line = float(row.get("line")) if row.get("line") is not None else None
+                        except Exception:
+                            line = None
+                        if line is None:
+                            continue
+                        gap = abs(line - target)
+                        if gap < best_gap or (gap == best_gap and line == target):
+                            chosen = row
+                            best_gap = gap
+                    if chosen and isinstance(chosen.get("over"), dict):
+                        p_over = chosen["over"].get("probability")
+                        if isinstance(p_over, (int, float)) and p_over >= 0.0:
+                            base = float(predictions.get("over_2_5_goals_probability", 0.0))
+                            w_tot = max(0.0, min(1.0, float(w_tot)))
+                            blended = (1.0 - w_tot) * base + w_tot * float(p_over)
+                            predictions.setdefault("adjustments", {})["market_totals_blend"] = {
+                                "weight": w_tot,
+                                "provider": (mkt2 or {}).get("provider"),
+                                "line": chosen.get("line"),
+                                "market_over_prob": float(p_over),
+                                "base_over_prob": base,
+                                "result_over_prob": float(blended),
+                            }
+                            predictions["over_2_5_goals_probability"] = float(blended)
+            except Exception as e:
+                predictions.setdefault("adjustments", {})["market_totals_blend_error"] = str(e)
             # BTTS from Poisson (1 - P(H=0) - P(A=0) + P(H=0,A=0))
             try:
                 if eg is None:
