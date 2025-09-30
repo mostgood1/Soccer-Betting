@@ -3240,8 +3240,9 @@ def api_team_goals_compare_week(
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
+        # Note: team-goals compare function does not support use_live; param is accepted here but ignored
         data = compare_week_team_goals_totals(
-            week, side=side, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
+            week, side=side, line=line, edge_threshold=edge_threshold, league=code
         )
         if isinstance(data, dict):
             data["league"] = code
