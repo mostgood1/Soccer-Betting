@@ -309,6 +309,9 @@ body {
     box-shadow: 0 0 0 3px rgba(0, 255, 135, 0.1);
 }
 
+/* Generic inline flex helper */
+.inline-flex-gap { display: inline-flex; align-items: center; gap: 6px; }
+
 /* Grids */
 .matches-grid,
 .teams-grid,

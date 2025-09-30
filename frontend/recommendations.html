@@ -98,6 +98,14 @@
           <option value="edge_desc">Edge (desc)</option>
           <option value="edge_asc">Edge (asc)</option>
         </select>
+        <span>Filter by:</span>
+        <select id="rec-filter-type" title="Filter by metric">
+          <option value="edge" selected>Edge</option>
+          <option value="ev">EV</option>
+        </select>
+        <label class="inline-flex-gap">
+          <input type="checkbox" id="rec-live" /> Live odds
+        </label>
         <button id="rec-apply" class="primary">Apply</button>
         <button id="rec-reset" class="ghost">Reset</button>
       </div>
@@ -316,7 +324,8 @@
       <span class="cron-label">Last cron:</span>
       <span id="cron-refresh-bovada">refresh-bovada: —</span> ·
       <span id="cron-daily-update">daily-update: —</span> ·
-      <span id="cron-capture-closing">capture-closing: —</span>
+  <span id="cron-capture-closing">capture-closing: —</span> ·
+  <span id="cron-snapshot-csv">snapshot-csv: —</span>
     </div>
   </footer>
 
@@ -339,6 +348,8 @@
           if (rb) rb.textContent = fmt(data['refresh-bovada'], 'refresh-bovada');
           if (du) du.textContent = fmt(data['daily-update'], 'daily-update');
           if (cc) cc.textContent = fmt(data['capture-closing'], 'capture-closing');
+          const sc = document.getElementById('cron-snapshot-csv');
+          if (sc) sc.textContent = fmt(data['snapshot-csv'], 'snapshot-csv');
         })
         .catch(()=>{});
     })();
@@ -424,7 +435,7 @@
     async function loadSecondHalf(week, threshold, line){ const url = `${API_BASE}/api/game-weeks/${week}/secondhalf-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Second-half load failed'); return await resp.json(); }
     async function loadTeamGoals(week, threshold, side, line){ const url = `${API_BASE}/api/game-weeks/${week}/team-goals-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&side=${encodeURIComponent(side)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Team goals load failed'); return await resp.json(); }
     async function loadTeamCorners(week, threshold, side, line){ const url = `${API_BASE}/api/game-weeks/${week}/team-corners-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&side=${encodeURIComponent(side)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Team corners load failed'); return await resp.json(); }
-  async function loadOddsCompare(week, edge){ const url = `${API_BASE}/api/game-weeks/${week}/odds-compare?edge_threshold=${encodeURIComponent(edge)}&use_live=false&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Odds-compare load failed'); return await resp.json(); }
+  async function loadOddsCompare(week, edge, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/odds-compare?edge_threshold=${encodeURIComponent(edge)}&use_live=${useLive?'true':'false'}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Odds-compare load failed'); return await resp.json(); }
   async function loadWeekReconciliation(week){ const url = `${API_BASE}/api/game-weeks/${week}/reconciliation?league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Reconciliation load failed'); return await resp.json(); }
 
     function computeEdge(modelProb, marketProb, modelPick){ if (typeof modelProb !== 'number' || typeof marketProb !== 'number' || !modelPick) return null; if (modelPick === 'Over') return modelProb - marketProb; if (modelPick === 'Under') return (1 - modelProb) - (1 - marketProb); return null; }
@@ -450,11 +461,13 @@
 
   async function gatherAll(week){
       const edge = Number(document.getElementById('rec-threshold').value || '0.03');
-      const key = `OC_FAST|w=${week}|e=${edge}|L=${CURRENT_LEAGUE}`;
+      const useLive = !!document.getElementById('rec-live').checked;
+      const filterType = (document.getElementById('rec-filter-type').value || 'edge');
+      const key = `OC_FAST|w=${week}|e=${edge}|L=${CURRENT_LEAGUE}|live=${useLive}|f=${filterType}`;
       if (CACHE.has(key)) return CACHE.get(key);
       let errors = [];
       const [oc, rec] = await Promise.all([
-        loadOddsCompare(week, edge).catch((e)=>{ errors.push('odds_compare'); return {matches:[], aggregate:{}}; }),
+        loadOddsCompare(week, edge, useLive).catch((e)=>{ errors.push('odds_compare'); return {matches:[], aggregate:{}}; }),
         loadWeekReconciliation(week).catch((e)=>{ errors.push('reconciliation'); return {success:false}; })
       ]);
       const items = [];
@@ -498,7 +511,10 @@
         });
       } catch {}
   items.forEach(it=> it.confidence = classifyConfidence(it.ev ?? it.edge));
-  const filtered = items.filter(it => typeof it.edge==='number' && it.edge >= edge);
+  const filtered = items.filter(it => {
+    if (filterType==='ev') return typeof it.ev==='number' && it.ev >= edge;
+    return typeof it.edge==='number' && it.edge >= edge;
+  });
   const result = { items: filtered, errors, aggregate: (oc && oc.aggregate) || {}, reconciliation: rec };
       CACHE.set(key, result);
       return result;
@@ -562,10 +578,23 @@
           const edgeVal = (typeof r.edge_for_model_pick==='number') ? r.edge_for_model_pick : computeEdge(r.model_over_prob, r.market_over_prob, r.model_pick);
           if (typeof edgeVal !== 'number' || !(edgeVal >= edge)) return;
           const isOver = (r.model_pick||'').toLowerCase()==='over';
+          // Market odds (moneyline) for the selected side
           const ml = (typeof r.market_over_prob==='number') ? (isOver? probToMoneyline(r.market_over_prob) : probToMoneyline(1-r.market_over_prob)) : '—';
+          // EV = model_prob_for_pick * decimal_odds_for_pick - 1, where decimal = 1 / market_prob_for_pick
+          let evVal = null;
+          try {
+            const modelOver = (typeof r.model_over_prob==='number') ? r.model_over_prob : null;
+            const marketOver = (typeof r.market_over_prob==='number') ? r.market_over_prob : null;
+            const pModelPick = (modelOver!=null) ? (isOver ? modelOver : (1 - modelOver)) : null;
+            const pMarketPick = (marketOver!=null) ? (isOver ? marketOver : (1 - marketOver)) : null;
+            if (typeof pModelPick==='number' && typeof pMarketPick==='number' && pMarketPick>0) {
+              const dec = 1 / pMarketPick;
+              evVal = pModelPick * dec - 1;
+            }
+          } catch {}
           let res = '—';
           if (typeof r.actual_over === 'number') { const won = (r.actual_over===1 && isOver) || (r.actual_over===0 && !isOver); res = won ? 'W' : 'L'; }
-          out.push({ type:label.toLowerCase(), market:label, pick:`${r.model_pick} ${r.market_line ?? defaultLine}`, odds_str: ml, edge: edgeVal, home_team:r.home_team, away_team:r.away_team, result: res, date: r.date || null });
+          out.push({ type:label.toLowerCase(), market:label, pick:`${r.model_pick} ${r.market_line ?? defaultLine}`, odds_str: ml, ev: (typeof evVal==='number'? evVal : null), edge: edgeVal, home_team:r.home_team, away_team:r.away_team, result: res, date: r.date || null });
         });
         return out;
       }
@@ -599,6 +628,7 @@
   async function render(){
     const week = Number(document.getElementById('rec-week').value || '1');
       const sortMode = document.getElementById('rec-sort').value;
+      const useLive = !!document.getElementById('rec-live').checked;
   // load branding (per league)
   try { const resp = await fetch(`${API_BASE}/api/branding/teams?league=${encodeURIComponent(CURRENT_LEAGUE)}`); if (resp.ok) { const data = await resp.json(); TEAM_BRANDING = data.branding||{}; } } catch {}
   const { items, errors, aggregate, reconciliation } = await gatherAll(week);
@@ -620,12 +650,19 @@
         document.getElementById('kpi-edge-rate').textContent = `Edge rate ${edgeRate}`;
       } catch {}
       document.body.classList.add('dark-sb');
+      // Update perf summary
+      try {
+        const el = document.getElementById('perf-summary');
+        if (el) {
+          el.textContent = useLive ? 'Live mode: using live market odds where available. Sorted by confidence then E.V.' : 'Fast mode: using historic market consensus (no live fetch). Sorted by confidence then E.V.';
+        }
+      } catch {}
     }
 
     (async function(){
       await loadWeeks();
       document.getElementById('rec-apply').addEventListener('click', async ()=>{ CACHE.clear(); DETAILS_CACHE.clear(); await render(); const ds = document.getElementById('details-sections'); if (ds && ds.style.display!=='none') await renderDetails(); });
-      document.getElementById('rec-reset').addEventListener('click', async ()=>{ document.getElementById('rec-sort').value='conf_then_edge'; document.getElementById('rec-threshold').value='0.03'; CACHE.clear(); DETAILS_CACHE.clear(); await render(); const ds = document.getElementById('details-sections'); if (ds && ds.style.display!=='none') await renderDetails(); });
+      document.getElementById('rec-reset').addEventListener('click', async ()=>{ document.getElementById('rec-sort').value='conf_then_edge'; document.getElementById('rec-filter-type').value='edge'; document.getElementById('rec-live').checked=false; document.getElementById('rec-threshold').value='0.03'; CACHE.clear(); DETAILS_CACHE.clear(); await render(); const ds = document.getElementById('details-sections'); if (ds && ds.style.display!=='none') await renderDetails(); });
       const toggle = document.getElementById('toggle-details');
       const ds = document.getElementById('details-sections');
       if (toggle && ds){
