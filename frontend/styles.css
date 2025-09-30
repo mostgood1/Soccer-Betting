@@ -50,6 +50,9 @@ body {
     font-size: 12px;
     text-align: center;
 }
+/* Footer cron summary */
+#cron-summary { opacity: 0.9; }
+#cron-summary .cron-label { color: #cbd5e1; font-weight: 500; margin-right: 6px; }
 /* Utility */
 .visually-hidden {
     position: absolute !important;

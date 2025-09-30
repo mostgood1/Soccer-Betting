@@ -133,7 +133,35 @@
         
         <!-- Global Footer Note -->
         <footer class="site-footer">
-            Want me to add a tiny dashboard endpoint to show last cron run status (timestamp + counts) for quick checks?
+            <div id="cron-summary">
+                <span class="cron-label">Last cron:</span>
+                <span id="cron-refresh-bovada">refresh-bovada: —</span> ·
+                <span id="cron-daily-update">daily-update: —</span> ·
+                <span id="cron-capture-closing">capture-closing: —</span>
+            </div>
         </footer>
+        <script>
+            (function(){
+                const apiBase = (typeof window !== 'undefined' && window.API_BASE_URL) ? window.API_BASE_URL : (window.location.protocol + '//' + window.location.host);
+                function ts(d){ try{ return (new Date(d)).toLocaleString(); } catch { return d||'—'; } }
+                fetch(apiBase + '/api/admin/status/cron-summary')
+                    .then(r=> r.ok ? r.json() : Promise.reject(r.status))
+                    .then(data => {
+                        const rb = document.getElementById('cron-refresh-bovada');
+                        const du = document.getElementById('cron-daily-update');
+                        const cc = document.getElementById('cron-capture-closing');
+                        const fmt = (obj, name) => {
+                            if (!obj) return name + ': —';
+                            if (obj.error) return name + ': error';
+                            if (obj.timestamp) return name + ': ' + ts(obj.timestamp);
+                            return name + ': —';
+                        };
+                        if (rb) rb.textContent = fmt(data['refresh-bovada'], 'refresh-bovada');
+                        if (du) du.textContent = fmt(data['daily-update'], 'daily-update');
+                        if (cc) cc.textContent = fmt(data['capture-closing'], 'capture-closing');
+                    })
+                    .catch(()=>{});
+            })();
+        </script>
 </body>
 </html>

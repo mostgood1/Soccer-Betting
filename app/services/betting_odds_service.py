@@ -133,11 +133,11 @@ class BettingOddsService:
         now = datetime.now()
         # Only keep events in the next N days for soccer
         try:
-            window_days = int(os.getenv("BOVADA_WINDOW_DAYS", "7"))
+            window_days = int(os.getenv("BOVADA_WINDOW_DAYS", "14"))
             if window_days < 0:
-                window_days = 7
+                window_days = 14
         except Exception:
-            window_days = 7
+            window_days = 14
         window_end = now + timedelta(days=window_days)
 
         def _in_window(ev: Dict[str, Any]) -> bool:
