@@ -1640,6 +1640,7 @@ def compare_week_totals(
     line: float = 2.5,
     edge_threshold: float = 0.05,
     league: Optional[str] = None,
+    use_live: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Compare totals market (Over/Under at given line) vs model vs actual for a week.
 
@@ -1660,31 +1661,43 @@ def compare_week_totals(
     weeks = game_week_service.organize_matches_by_week(matches)
     wk_matches = weeks.get(week, [])
     historic_idx = _load_historic_odds_index()
-    # Backup live Bovada totals lookup
-    bovada_totals: Dict[str, Dict[str, Any]] = {}
+    # Live gating
+    allow_live: bool = False
     try:
-        fetcher = _get_bovada_fetcher(code)
-        if fetcher is not None:
-            bova = fetcher() if fetcher is not None else {"events": []}
-            for ev in bova.get("events") or []:
-                h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
-                a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
-                key = f"{h}|{a}".lower()
-                for t in ev.get("totals") or []:
-                    try:
-                        l = float(t.get("line")) if t.get("line") is not None else None
-                    except Exception:
-                        l = None
-                    if l is None:
-                        continue
-                    bovada_totals.setdefault(key, {})[l] = {
-                        "over_prob": t.get("over_prob"),
-                        "under_prob": t.get("under_prob"),
-                        "market_line": l,
-                        "source": "live_bovada",
-                    }
+        if use_live is not None:
+            allow_live = bool(use_live)
+        else:
+            allow_live = (
+                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            )
     except Exception:
-        pass
+        allow_live = False
+    # Backup live Bovada totals lookup (only if live enabled)
+    bovada_totals: Dict[str, Dict[str, Any]] = {}
+    if allow_live:
+        try:
+            fetcher = _get_bovada_fetcher(code)
+            if fetcher is not None:
+                bova = fetcher() if fetcher is not None else {"events": []}
+                for ev in bova.get("events") or []:
+                    h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
+                    a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
+                    key = f"{h}|{a}".lower()
+                    for t in ev.get("totals") or []:
+                        try:
+                            l = float(t.get("line")) if t.get("line") is not None else None
+                        except Exception:
+                            l = None
+                        if l is None:
+                            continue
+                        bovada_totals.setdefault(key, {})[l] = {
+                            "over_prob": t.get("over_prob"),
+                            "under_prob": t.get("under_prob"),
+                            "market_line": l,
+                            "source": "live_bovada",
+                        }
+        except Exception:
+            pass
 
     # Try real goals market store first (if populated), then historic consensus
     def get_totals_from_store(date: str, home: str, away: str, line: float):
@@ -1807,7 +1820,7 @@ def compare_week_totals(
             market_totals = get_totals_from_historic(market_rec) if market_rec else None
             market_source_str = "historic_totals_consensus" if market_totals else None
         # If no historic, try Bovada totals at matching line (any league supported by fetcher)
-        if (not market_totals) and date:
+        if allow_live and (not market_totals) and date:
             key = f"{home.lower()}|{away.lower()}"
             by_match = bovada_totals.get(key) or {}
             # Support nearest-line tolerance (±0.25) for Bovada totals
@@ -2035,6 +2048,7 @@ def compare_week_first_half_totals(
     line: float = 1.0,
     edge_threshold: float = 0.05,
     league: Optional[str] = None,
+    use_live: Optional[bool] = None,
 ) -> Dict[str, Any]:
     if not _prediction_cache:
         rebuild_predictions()
@@ -2049,31 +2063,44 @@ def compare_week_first_half_totals(
     wk_matches = weeks.get(week, [])
     historic_idx = _load_historic_odds_index()
 
+    # Live gating
+    allow_live: bool = False
+    try:
+        if use_live is not None:
+            allow_live = bool(use_live)
+        else:
+            allow_live = (
+                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            )
+    except Exception:
+        allow_live = False
+
     # Backup live Bovada first-half totals lookup
     bovada_fh: Dict[str, Dict[float, Dict[str, Any]]] = {}
-    try:
-        fetcher = _get_bovada_fetcher(code)
-        if fetcher is not None:
-            bova = fetcher() if fetcher is not None else {"events": []}
-            for ev in bova.get("events") or []:
-                h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
-                a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
-                key = f"{h}|{a}".lower()
-                for t in ev.get("first_half_totals") or []:
-                    try:
-                        l = float(t.get("line")) if t.get("line") is not None else None
-                    except Exception:
-                        l = None
-                    if l is None:
-                        continue
-                    bovada_fh.setdefault(key, {})[l] = {
-                        "over_prob": t.get("over_prob"),
-                        "under_prob": t.get("under_prob"),
-                        "market_line": l,
-                        "source": "live_bovada",
-                    }
-    except Exception:
-        pass
+    if allow_live:
+        try:
+            fetcher = _get_bovada_fetcher(code)
+            if fetcher is not None:
+                bova = fetcher() if fetcher is not None else {"events": []}
+                for ev in bova.get("events") or []:
+                    h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
+                    a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
+                    key = f"{h}|{a}".lower()
+                    for t in ev.get("first_half_totals") or []:
+                        try:
+                            l = float(t.get("line")) if t.get("line") is not None else None
+                        except Exception:
+                            l = None
+                        if l is None:
+                            continue
+                        bovada_fh.setdefault(key, {})[l] = {
+                            "over_prob": t.get("over_prob"),
+                            "under_prob": t.get("under_prob"),
+                            "market_line": l,
+                            "source": "live_bovada",
+                        }
+        except Exception:
+            pass
 
     rows: List[Dict[str, Any]] = []
     model_log_losses: List[float] = []
@@ -2370,6 +2397,7 @@ def compare_week_second_half_totals(
     line: float = 1.0,
     edge_threshold: float = 0.05,
     league: Optional[str] = None,
+    use_live: Optional[bool] = None,
 ) -> Dict[str, Any]:
     if not _prediction_cache:
         rebuild_predictions()
@@ -2384,31 +2412,42 @@ def compare_week_second_half_totals(
     wk_matches = weeks.get(week, [])
     historic_idx = _load_historic_odds_index()
 
-    # Backup live Bovada second-half totals lookup
-    bovada_sh: Dict[str, Dict[float, Dict[str, Any]]] = {}
+    # Backup live Bovada second-half totals lookup (only if live enabled)
+    allow_live: bool = False
     try:
-        fetcher = _get_bovada_fetcher(code)
-        if fetcher is not None:
-            bova = fetcher() if fetcher is not None else {"events": []}
-            for ev in bova.get("events") or []:
-                h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
-                a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
-                key = f"{h}|{a}".lower()
-                for t in ev.get("second_half_totals") or []:
-                    try:
-                        l = float(t.get("line")) if t.get("line") is not None else None
-                    except Exception:
-                        l = None
-                    if l is None:
-                        continue
-                    bovada_sh.setdefault(key, {})[l] = {
-                        "over_prob": t.get("over_prob"),
-                        "under_prob": t.get("under_prob"),
-                        "market_line": l,
-                        "source": "live_bovada",
-                    }
+        if use_live is not None:
+            allow_live = bool(use_live)
+        else:
+            allow_live = (
+                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            )
     except Exception:
-        pass
+        allow_live = False
+    bovada_sh: Dict[str, Dict[float, Dict[str, Any]]] = {}
+    if allow_live:
+        try:
+            fetcher = _get_bovada_fetcher(code)
+            if fetcher is not None:
+                bova = fetcher() if fetcher is not None else {"events": []}
+                for ev in bova.get("events") or []:
+                    h = normalize_team_name(ev.get("home_team")) or ev.get("home_team")
+                    a = normalize_team_name(ev.get("away_team")) or ev.get("away_team")
+                    key = f"{h}|{a}".lower()
+                    for t in ev.get("second_half_totals") or []:
+                        try:
+                            l = float(t.get("line")) if t.get("line") is not None else None
+                        except Exception:
+                            l = None
+                        if l is None:
+                            continue
+                        bovada_sh.setdefault(key, {})[l] = {
+                            "over_prob": t.get("over_prob"),
+                            "under_prob": t.get("under_prob"),
+                            "market_line": l,
+                            "source": "live_bovada",
+                        }
+        except Exception:
+            pass
 
     rows: List[Dict[str, Any]] = []
     model_log_losses: List[float] = []
@@ -2459,8 +2498,7 @@ def compare_week_second_half_totals(
             _ = historic_idx.get(f"{date}|{home.lower()}|{away.lower()}")
         else:
             _ = historic_idx.get(f"{home}|{away}".lower())
-        # Bovada backup by exact line
-        # Bovada backup by nearest line within tolerance
+        # Bovada backup by nearest line within tolerance (only if live enabled)
         try:
             key = f"{home.lower()}|{away.lower()}"
             by_match = bovada_sh.get(key) or {}
@@ -2471,7 +2509,7 @@ def compare_week_second_half_totals(
             except Exception:
                 tol = 0.25
             chosen_line = None
-            if market_over_prob is None and by_match:
+            if allow_live and market_over_prob is None and by_match:
                 if line in by_match:
                     chosen_line = line
                 else:
@@ -2485,7 +2523,7 @@ def compare_week_second_half_totals(
                                 chosen_line = None
                     except Exception:
                         chosen_line = None
-            if market_over_prob is None and (chosen_line is not None):
+            if allow_live and market_over_prob is None and (chosen_line is not None):
                 bt = by_match.get(chosen_line) or {}
                 op = bt.get("over_prob")
                 up = bt.get("under_prob")
@@ -3164,6 +3202,7 @@ def compare_week_team_corners_totals(
     line: float = 4.5,
     edge_threshold: float = 0.05,
     league: Optional[str] = None,
+    use_live: Optional[bool] = None,
 ) -> Dict[str, Any]:
     s = side.lower()
     assert s in ("home", "away"), "side must be 'home' or 'away'"

@@ -429,12 +429,12 @@
 
     // Backend loaders
   async function loadEdges(week, threshold){ const url = `${API_BASE}/api/betting/edges/week/${week}?limit=100&threshold=${encodeURIComponent(threshold)}&allow_on_demand=true&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Edges load failed'); return await resp.json(); }
-    async function loadTotals(week, threshold, line){ const url = `${API_BASE}/api/game-weeks/${week}/totals-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Totals load failed'); return await resp.json(); }
-    async function loadCorners(week, threshold, line){ const url = `${API_BASE}/api/game-weeks/${week}/corners-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Corners load failed'); return await resp.json(); }
-    async function loadFirstHalf(week, threshold, line){ const url = `${API_BASE}/api/game-weeks/${week}/firsthalf-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('First-half load failed'); return await resp.json(); }
-    async function loadSecondHalf(week, threshold, line){ const url = `${API_BASE}/api/game-weeks/${week}/secondhalf-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Second-half load failed'); return await resp.json(); }
-    async function loadTeamGoals(week, threshold, side, line){ const url = `${API_BASE}/api/game-weeks/${week}/team-goals-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&side=${encodeURIComponent(side)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Team goals load failed'); return await resp.json(); }
-    async function loadTeamCorners(week, threshold, side, line){ const url = `${API_BASE}/api/game-weeks/${week}/team-corners-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&side=${encodeURIComponent(side)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Team corners load failed'); return await resp.json(); }
+  async function loadTotals(week, threshold, line, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/totals-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}&use_live=${useLive?'true':'false'}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Totals load failed'); return await resp.json(); }
+  async function loadCorners(week, threshold, line){ const url = `${API_BASE}/api/game-weeks/${week}/corners-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Corners load failed'); return await resp.json(); }
+  async function loadFirstHalf(week, threshold, line, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/firsthalf-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}&use_live=${useLive?'true':'false'}`; const resp = await fetch(url); if(!resp.ok) throw new Error('First-half load failed'); return await resp.json(); }
+  async function loadSecondHalf(week, threshold, line, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/secondhalf-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&league=${encodeURIComponent(CURRENT_LEAGUE)}&use_live=${useLive?'true':'false'}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Second-half load failed'); return await resp.json(); }
+  async function loadTeamGoals(week, threshold, side, line, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/team-goals-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&side=${encodeURIComponent(side)}&league=${encodeURIComponent(CURRENT_LEAGUE)}&use_live=${useLive?'true':'false'}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Team goals load failed'); return await resp.json(); }
+  async function loadTeamCorners(week, threshold, side, line, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/team-corners-compare?edge_threshold=${encodeURIComponent(threshold)}&line=${encodeURIComponent(line)}&side=${encodeURIComponent(side)}&league=${encodeURIComponent(CURRENT_LEAGUE)}&use_live=${useLive?'true':'false'}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Team corners load failed'); return await resp.json(); }
   async function loadOddsCompare(week, edge, useLive){ const url = `${API_BASE}/api/game-weeks/${week}/odds-compare?edge_threshold=${encodeURIComponent(edge)}&use_live=${useLive?'true':'false'}&league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Odds-compare load failed'); return await resp.json(); }
   async function loadWeekReconciliation(week){ const url = `${API_BASE}/api/game-weeks/${week}/reconciliation?league=${encodeURIComponent(CURRENT_LEAGUE)}`; const resp = await fetch(url); if(!resp.ok) throw new Error('Reconciliation load failed'); return await resp.json(); }
 
@@ -562,15 +562,16 @@
       const edge = Number(document.getElementById('rec-threshold').value || '0.03');
       const key = `DETAILS|w=${week}|e=${edge}|L=${CURRENT_LEAGUE}`;
       if (DETAILS_CACHE.has(key)) return DETAILS_CACHE.get(key);
+      const useLive = !!document.getElementById('rec-live').checked;
       const [totals25, corners95, fh, sh, tgh, tga, tch, tca] = await Promise.all([
-        loadTotals(week, edge, 2.5).catch(()=>({matches:[]})),
+        loadTotals(week, edge, 2.5, useLive).catch(()=>({matches:[]})),
         loadCorners(week, edge, 9.5).catch(()=>({matches:[]})),
-        loadFirstHalf(week, edge, 1.0).catch(()=>({matches:[]})),
-        loadSecondHalf(week, edge, 1.0).catch(()=>({matches:[]})),
-        loadTeamGoals(week, edge, 'home', 1.5).catch(()=>({matches:[]})),
-        loadTeamGoals(week, edge, 'away', 1.5).catch(()=>({matches:[]})),
-        loadTeamCorners(week, edge, 'home', 4.5).catch(()=>({matches:[]})),
-        loadTeamCorners(week, edge, 'away', 4.5).catch(()=>({matches:[]})),
+        loadFirstHalf(week, edge, 1.0, useLive).catch(()=>({matches:[]})),
+        loadSecondHalf(week, edge, 1.0, useLive).catch(()=>({matches:[]})),
+        loadTeamGoals(week, edge, 'home', 1.5, useLive).catch(()=>({matches:[]})),
+        loadTeamGoals(week, edge, 'away', 1.5, useLive).catch(()=>({matches:[]})),
+        loadTeamCorners(week, edge, 'home', 4.5, useLive).catch(()=>({matches:[]})),
+        loadTeamCorners(week, edge, 'away', 4.5, useLive).catch(()=>({matches:[]})),
       ]);
       function mapOU(arr, label, defaultLine){
         const out=[];

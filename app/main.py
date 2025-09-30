@@ -1178,6 +1178,73 @@ def api_admin_odds_snapshot_csv(
         raise HTTPException(status_code=500, detail=f"CSV snapshot failed: {e}")
 
 
+@app.post("/api/cron/snapshot-csv")
+def api_cron_snapshot_csv(
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN env var"
+    ),
+    authorization: Optional[str] = Header(
+        None, description="Authorization: Bearer <token> header (optional)"
+    ),
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    week: Optional[int] = Query(None, description="Optional game week tag to include in CSV"),
+    include_odds_api: bool = Query(True, description="If true, also append The Odds API bookmaker rows (if key set)"),
+    odds_api_bookmakers: Optional[str] = Query(None, description="Comma list to filter Odds API bookmakers for CSV (e.g., bet365,fanduel)"),
+):
+    """Cron-friendly wrapper to append current provider odds into CSV historics under data/odds_history.
+
+    Writes h2h_{LEAGUE}.csv with one row per bookmaker outcome. Uses Bovada events
+    as primary, and optionally The Odds API normalized payload for richer bookmaker coverage.
+    Records a cron status file for display in the UI.
+    """
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        leagues = []
+        if not league or league.upper() == "ALL":
+            leagues = ["PL", "BL1", "FL1", "SA", "PD"]
+        else:
+            leagues = [league.upper()]
+        total_rows = 0
+        # Ensure Bovada snapshots are fresh
+        bov = betting_odds_service.prefetch_bovada()
+        # Append from Bovada cache
+        for lg in leagues:
+            snap = betting_odds_service._bovada_cache.get(lg) or {}
+            events = snap.get("events") or []
+            total_rows += append_h2h_from_bovada(lg, events, week=week)
+        # Optionally, append from The Odds API per-sport snapshots
+        if include_odds_api and betting_odds_service.odds_api_key:
+            betting_odds_service.prefetch()
+            bk_list = (
+                [s.strip() for s in (odds_api_bookmakers or "").split(",") if s.strip()]
+                if odds_api_bookmakers
+                else None
+            )
+            sport_map = {
+                "PL": "soccer_epl",
+                "BL1": "soccer_germany_bundesliga",
+                "FL1": "soccer_france_ligue_one",
+                "SA": "soccer_italy_serie_a",
+                "PD": "soccer_spain_la_liga",
+            }
+            for lg in leagues:
+                sport_key = sport_map.get(lg)
+                if not sport_key:
+                    continue
+                payload = betting_odds_service._sport_cache.get(sport_key)
+                if payload:
+                    total_rows += append_h2h_from_oddsapi(
+                        lg, payload, week=week, bookmaker_filter=bk_list
+                    )
+        res = {"success": True, "rows_appended": total_rows, "leagues": leagues}
+        _write_cron_status("snapshot-csv", res)
+        return res
+    except Exception as e:
+        _write_cron_status("snapshot-csv", {"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"CSV snapshot failed: {e}")
+
+
 @app.post("/api/admin/edges/warm")
 def api_admin_edges_warm(
     league: Optional[str] = Query(
@@ -1480,7 +1547,7 @@ def api_admin_cron_summary():
     """Return timestamps and brief summaries for last cron runs."""
     out: Dict[str, Any] = {}
     try:
-        for name in ("refresh-bovada", "daily-update", "capture-closing"):
+        for name in ("refresh-bovada", "daily-update", "capture-closing", "snapshot-csv"):
             p = _CRON_STATUS_DIR / f"{name}.json"
             if p.exists():
                 try:
@@ -2798,6 +2865,10 @@ def api_totals_compare_week(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    use_live: bool = Query(
+        False,
+        description="If true, include live market fallback (slower). Default false for speed",
+    ),
 ):
     """Model vs (optional) market comparison for Full-Game Goals Totals."""
     try:
@@ -2805,7 +2876,7 @@ def api_totals_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_totals(
-            week, line=line, edge_threshold=edge_threshold, league=code
+            week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -2822,6 +2893,10 @@ def api_firsthalf_compare_week(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    use_live: bool = Query(
+        False,
+        description="If true, include live market fallback (slower). Default false for speed",
+    ),
 ):
     """Model vs (optional) market comparison for First Half Goals Totals."""
     try:
@@ -2829,7 +2904,7 @@ def api_firsthalf_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_first_half_totals(
-            week, line=line, edge_threshold=edge_threshold, league=code
+            week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -2846,6 +2921,10 @@ def api_secondhalf_compare_week(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    use_live: bool = Query(
+        False,
+        description="If true, include live market fallback (slower). Default false for speed",
+    ),
 ):
     """Model vs (optional) market comparison for Second Half Goals Totals."""
     try:
@@ -2853,7 +2932,7 @@ def api_secondhalf_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_second_half_totals(
-            week, line=line, edge_threshold=edge_threshold, league=code
+            week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -2988,6 +3067,10 @@ def api_team_goals_compare_week(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    use_live: bool = Query(
+        False,
+        description="If true, include live market fallback (slower). Default false for speed",
+    ),
 ):
     """Model vs (optional) market comparison for Team Goals (home/away) totals."""
     try:
@@ -2995,7 +3078,7 @@ def api_team_goals_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_team_goals_totals(
-            week, side=side, line=line, edge_threshold=edge_threshold, league=code
+            week, side=side, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -3013,6 +3096,10 @@ def api_team_corners_compare_week(
     league: Optional[str] = Query(
         None, description="League code (PL, BL1, FL1, SA, PD)"
     ),
+    use_live: bool = Query(
+        False,
+        description="If true, include live market fallback (slower). Default false for speed",
+    ),
 ):
     """Model vs (optional) market comparison for Team Corners (home/away) totals."""
     try:
@@ -3020,7 +3107,7 @@ def api_team_corners_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_team_corners_totals(
-            week, side=side, line=line, edge_threshold=edge_threshold, league=code
+            week, side=side, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
         )
         if isinstance(data, dict):
             data["league"] = code
