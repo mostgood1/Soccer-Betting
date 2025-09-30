@@ -125,6 +125,16 @@ NORMALIZATION_MAP: Dict[str, str] = {
 
 SUFFIXES = (" afc", " fc", " a.f.c.", " f.c.")
 
+# Common club prefixes/suffixes and artifacts across leagues to ignore for matching
+_STOP_TOKENS = {
+    # generic
+    "fc", "afc", "cf", "cfc", "sc", "sd", "cd",
+    # italy-specific
+    "calcio", "ss", "us", "acf", "asd",
+    # spain/france variants
+    "sa", "sad", "ud", "ac",
+}
+
 
 def _strip_diacritics(s: str) -> str:
     try:
@@ -152,11 +162,15 @@ def normalize_team_name(name: Optional[str]) -> Optional[str]:
     if key in NORMALIZATION_MAP:
         return NORMALIZATION_MAP[key]
     # Also drop apostrophes from tokenization/title-casing path
-    tokens = [
-        t.replace("'", "").replace("’", "")
-        for t in raw.replace(".", " ").split()
-        if t.lower() not in {"fc", "afc"}
-    ]
+    tokens = []
+    for t in raw.replace(".", " ").split():
+        tl = _strip_diacritics(t.lower()).replace("'", "").replace("’", "")
+        # skip common stop tokens (club designations) and pure numeric tokens (years like 1909/1913)
+        if tl in _STOP_TOKENS:
+            continue
+        if tl.isdigit():
+            continue
+        tokens.append(t)
     if not tokens:
         return raw
     candidate = " ".join(tokens)
