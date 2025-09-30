@@ -564,13 +564,30 @@ class BettingOddsService:
                 ea = normalize_team_name(ev.get("away_team") or "") or (
                     ev.get("away_team") or ""
                 )
-                if (
-                    eh
-                    and ea
-                    and eh.lower() == home.lower()
-                    and ea.lower() == away.lower()
-                ):
-                    return ev
+                if eh and ea:
+                    h = eh.lower()
+                    a = ea.lower()
+                    if h == home.lower() and a == away.lower():
+                        return ev
+                    # Relaxed alias/contains match for provider quirks (e.g., 'FC Internazionale Milano' vs 'Inter')
+                    def _aliases(s: str) -> set:
+                        base = s.lower()
+                        parts = set([base])
+                        # Remove common tokens and numbers
+                        for tok in [" fc", " afc", " calcio", " ss ", " us ", " acf ", " ac "]:
+                            base = base.replace(tok.strip(), "")
+                        parts.add(base)
+                        parts.add(base.replace("  ", " ").strip())
+                        parts |= set(base.replace("  ", " ").strip().split())
+                        return {p for p in parts if p}
+                    H = _aliases(h)
+                    A = _aliases(a)
+                    th = home.lower()
+                    ta = away.lower()
+                    if (th in H or any(th in p or p in th for p in H)) and (
+                        ta in A or any(ta in p or p in ta for p in A)
+                    ):
+                        return ev
         return None
 
     def _prob_to_decimal(self, prob: Optional[float]) -> Optional[float]:
