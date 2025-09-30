@@ -123,10 +123,12 @@ def _fetch_bovada_coupon(
         # Try both coupon groups (A/B) as Bovada sometimes switches group
         arr = None
         for grp in ("A", "B"):
+            # Include query params to retrieve pre-match markets and sufficient events
             url = (
                 base.rstrip("/")
                 + f"/services/sports/event/coupon/events/{grp}/description"
                 + url_suffix
+                + "?marketFilterId=def&preMatchOnly=true&lang=en&eventsLimit=2000"
             )
             try:
                 r = requests.get(url, headers=headers, timeout=timeout)
