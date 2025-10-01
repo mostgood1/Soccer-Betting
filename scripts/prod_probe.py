@@ -67,7 +67,9 @@ def main() -> int:
         help="Bearer token for protected cron/admin endpoints",
     )
     p.add_argument(
-        "--league", default="PL", help="League to spot-check for odds week route"
+        "--league",
+        default="PL",
+        help="Primary league to print details for (the script will still validate ALL leagues)",
     )
     p.add_argument(
         "--week", type=int, default=6, help="Week number to test, defaults to 6"
@@ -188,21 +190,7 @@ def main() -> int:
 
     step("cron-summary", cron_summary)
 
-    # Odds, week
-    def odds_week():
-        r = _get(
-            base, f"/api/betting/odds/week/{args.week}?league={args.league}&limit=3"
-        )
-        print(r.status_code, r.text[:300])
-        r.raise_for_status()
-        j = r.json()
-        assert isinstance(j, dict)
-        # odds may be empty depending on providers; don't fail hard
-        return j
-
-    step("odds-week", odds_week)
-
-    # Odds, match
+    # Odds, match (single sample)
     def odds_match():
         r = _get(base, f"/api/betting/odds/{args.home}/{args.away}")
         print(r.status_code, r.text[:300])
@@ -211,24 +199,70 @@ def main() -> int:
 
     step("odds-match", odds_match)
 
-    # Optional: upcoming (if deployed route exists)
-    def odds_upcoming():
-        # Use cache-only and include odds to validate EU aggregator coverage
+    # Validate ALL leagues for week odds, edges, and recommendations
+    ALL_LEAGUES = ["PL", "BL1", "FL1", "SA", "PD"]
+
+    def check_league(lg: str):
+        out: Dict[str, Any] = {"league": lg}
+        # Week odds (limit 3)
+        rw = _get(base, f"/api/betting/odds/week/{args.week}?league={lg}&limit=3")
+        print(lg, "odds-week:", rw.status_code, rw.text[:160])
+        try:
+            rw.raise_for_status()
+            out["odds_week_count"] = len((rw.json() or {}).get("matches", []))
+        except Exception as e:
+            out["odds_week_error"] = str(e)
+        # Week edges (fast Bovada-only path)
+        re = _get(
+            base,
+            f"/api/betting/edges/week/{args.week}?league={lg}&limit=3&threshold=0.01&allow_on_demand=false&fast=true",
+        )
+        print(lg, "edges-week:", re.status_code, re.text[:160])
+        try:
+            re.raise_for_status()
+            out["edges_week_count"] = len((re.json() or {}).get("matches", []))
+        except Exception as e:
+            out["edges_week_error"] = str(e)
+        # Recommendations latest
+        rr = _get(base, "/api/recommendations/latest", params={"league": lg})
+        print(lg, "recs-latest:", rr.status_code, rr.text[:160])
+        if rr.status_code == 404:
+            out["recs_latest"] = "missing"
+        else:
+            try:
+                rr.raise_for_status()
+                out["recs_latest_count"] = len((rr.json() or {}).get("matches", []))
+            except Exception as e:
+                out["recs_latest_error"] = str(e)
+        return out
+
+    per_league = []
+    print("\n==> Validating ALL leagues")
+    for lg in ALL_LEAGUES:
+        try:
+            per_league.append(check_league(lg))
+            time.sleep(0.3)
+        except Exception as e:
+            per_league.append({"league": lg, "error": str(e)})
+
+    # Upcoming multi-league with odds (cache-only to avoid live calls)
+    def odds_upcoming_all():
         r = _get(
             base,
-            "/api/betting/odds/upcoming?prefetch=false&limit=5&include_odds=true&cache_only=true",
-            timeout=60,
+            "/api/betting/odds/upcoming?leagues=ALL&prefetch=false&limit=5&include_odds=true&cache_only=true",
+            timeout=90,
         )
-        print(r.status_code, r.text[:300])
+        print("upcoming-all:", r.status_code, r.text[:300])
         if r.status_code == 404:
-            print("[warn] upcoming route not present on this deployment")
             return {"skipped": True}
         r.raise_for_status()
-        return r.json()
+        j = r.json()
+        leagues = j.get("leagues", {}) if isinstance(j, dict) else {}
+        return {"leagues": {k: v.get("count", 0) for k, v in leagues.items()}}
 
-    step("odds-upcoming", odds_upcoming)
+    up = step("odds-upcoming-all", odds_upcoming_all)
 
-    # Verify latest recommendations exist for given league
+    # Verify latest recommendations exist for primary league (detail print)
     def recommendations_latest():
         r = _get(base, "/api/recommendations/latest", params={"league": args.league})
         print(r.status_code, r.text[:300])
@@ -243,6 +277,14 @@ def main() -> int:
         return {"count": len(_)}
 
     step("recommendations-latest", recommendations_latest)
+
+    # Print compact per-league summary at the end
+    print("\nPer-league summary:")
+    try:
+        for row in per_league:
+            print(json.dumps(row, indent=2))
+    except Exception:
+        pass
 
     print("\nSummary:")
     if failures:
