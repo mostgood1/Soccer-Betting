@@ -54,6 +54,11 @@ services:
         command: |
           TOKEN=${REFRESH_CRON_TOKEN:-} ; \
           curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/snapshot-csv?league=ALL&include_odds_api=true" -H "Authorization: Bearer $TOKEN"
+      - name: precompute-recommendations
+        schedule: "10 * * * *"  # hourly +10 minutes, after snapshots
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=ALL&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
       - name: capture-closing-nightly
         schedule: "20 3 * * *"  # daily at 03:20 UTC (before reconciliation)
         command: |

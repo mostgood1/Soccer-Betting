@@ -1958,7 +1958,7 @@ def api_admin_cron_summary():
     """Return timestamps and brief summaries for last cron runs."""
     out: Dict[str, Any] = {}
     try:
-        for name in ("refresh-bovada", "daily-update", "capture-closing", "snapshot-csv", "fetch-scores"):
+        for name in ("refresh-bovada", "daily-update", "capture-closing", "snapshot-csv", "fetch-scores", "precompute-recommendations"):
             p = _CRON_STATUS_DIR / f"{name}.json"
             if p.exists():
                 try:
@@ -1976,6 +1976,138 @@ def api_admin_cron_summary():
         cron_ok = False
     out["cron_token_configured"] = cron_ok
     return out
+
+
+# -------------------------------------------------------------
+# Recommendations precompute & serve
+# -------------------------------------------------------------
+
+@app.post("/api/cron/precompute-recommendations")
+def api_cron_precompute_recommendations(
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN env var"
+    ),
+    authorization: Optional[str] = Header(
+        None, description="Authorization: Bearer <token> header (optional)"
+    ),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD) or ALL"
+    ),
+    edge_threshold: float = Query(0.03, ge=0.0, le=0.5),
+    prob_threshold: float = Query(0.5, ge=0.0, le=1.0),
+):
+    """Compute and persist recommendations (edges + EV when available) for the next upcoming week per league.
+
+    This is a fast, cache-first job that:
+      - Ensures Bovada snapshots are prefetched (EU-first) for broad coverage
+      - For each requested league (or ALL), finds the next week with future fixtures
+      - Runs compare_week_odds to compute edges, EV (when preferred_decimals available), and metrics
+      - Persists a compact recommendations JSON under data/recommendations/{LEAGUE}_week{W}.json
+    """
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        # Warm Bovada cache (EU-first)
+        try:
+            betting_odds_service.prefetch_bovada()
+        except Exception:
+            pass
+        leagues = []
+        if not league or str(league).upper() == "ALL":
+            leagues = ["PL", "BL1", "FL1", "SA", "PD"]
+        else:
+            leagues = [str(league).upper()]
+        from datetime import datetime, timezone, timedelta
+
+        def _parse_dt(m):
+            d = m.get("utc_date") or m.get("date")
+            if not d:
+                return None
+            try:
+                if isinstance(d, str):
+                    if d.endswith("Z"):
+                        return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                    return datetime.fromisoformat(d)
+                return d
+            except Exception:
+                return None
+
+        out_summary: Dict[str, Any] = {"leagues": {}, "saved": []}
+        now_dt = datetime.now(timezone.utc)
+        for lg in leagues:
+            try:
+                svc = get_league_service(lg)
+            except Exception:
+                out_summary["leagues"][lg] = {"error": "no service"}
+                continue
+            matches = (
+                svc.get_all_matches()
+                if hasattr(svc, "get_all_matches")
+                else enhanced_epl_service.get_all_matches()
+            )
+            weeks = game_week_service.organize_matches_by_week(matches)
+            upcoming_weeks: List[int] = []
+            for wnum, wmatches in weeks.items():
+                for m in wmatches:
+                    dtm = _parse_dt(m)
+                    if dtm and dtm.tzinfo is None:
+                        dtm = dtm.replace(tzinfo=timezone.utc)
+                    if dtm and (dtm >= now_dt - timedelta(hours=6)):
+                        upcoming_weeks.append(int(wnum))
+                        break
+            wk = min(upcoming_weeks) if upcoming_weeks else (max(weeks.keys()) if weeks else None)
+            if not wk:
+                out_summary["leagues"][lg] = {"week": None, "saved": None}
+                continue
+            # Compute compare_week_odds for this league & week (no live fetch)
+            data = compare_week_odds(
+                int(wk), edge_threshold=edge_threshold, league=lg, use_live=False, prob_threshold=prob_threshold
+            )
+            # Persist compact recommendations file
+            rec_dir = Path("data/recommendations")
+            rec_dir.mkdir(parents=True, exist_ok=True)
+            path = rec_dir / f"{lg}_week{wk}.json"
+            try:
+                Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+                out_summary["leagues"][lg] = {"week": int(wk), "saved": str(path), "rows": len((data or {}).get("matches", []))}
+                out_summary["saved"].append(str(path))
+            except Exception as e:
+                out_summary["leagues"][lg] = {"week": int(wk), "error": str(e)}
+        _write_cron_status("precompute-recommendations", out_summary)
+        return {"success": True, **out_summary}
+    except Exception as e:
+        _write_cron_status("precompute-recommendations", {"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Precompute recommendations failed: {e}")
+
+
+@app.get("/api/recommendations/latest")
+def api_get_latest_recommendations(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD)"),
+    week: Optional[int] = Query(None, description="Optional week override. If absent, returns most recent file."),
+):
+    """Serve the latest saved recommendations JSON for a league.
+
+    If week is not provided, this returns the most recently modified recommendations file for the league.
+    """
+    try:
+        lg = (league or "PL").upper()
+        rec_dir = Path("data/recommendations")
+        if not rec_dir.exists():
+            raise HTTPException(status_code=404, detail="No recommendations available yet")
+        if week is not None:
+            p = rec_dir / f"{lg}_week{int(week)}.json"
+            if not p.exists():
+                raise HTTPException(status_code=404, detail="Recommendations not found for requested week")
+            return json.loads(p.read_text(encoding="utf-8"))
+        # pick latest by mtime
+        cand = sorted(rec_dir.glob(f"{lg}_week*.json"), key=lambda x: x.stat().st_mtime, reverse=True)
+        if not cand:
+            raise HTTPException(status_code=404, detail="No recommendations found for league")
+        return json.loads(cand[0].read_text(encoding="utf-8"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load recommendations: {e}")
 
 
 @app.get("/api/admin/status/config")
