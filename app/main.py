@@ -3,7 +3,7 @@ Main FastAPI application for Soccer Betting Platform
 Enhanced with comprehensive data services for EPL 2025-26
 """
 
-from fastapi import FastAPI, HTTPException, Query, Request, Header, Body
+from fastapi import FastAPI, HTTPException, Query, Request, Header, Body, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -101,6 +101,7 @@ from .services.team_branding import get_team_branding
 from .services.week_snapshot_service import WeekSnapshotService
 from shutil import copyfile
 import subprocess
+import requests as _requests
 
 # Attempt model load/train at startup for real predictions (can be skipped via env)
 if os.getenv("ML_SKIP_STARTUP_TRAIN", "0") == "1":
@@ -1822,6 +1823,53 @@ def api_admin_corners_fetch_fbref(
         return {"success": True, "appended": appended, "stdout": proc.stdout[:500]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Corners fetch failed: {e}")
+
+
+@app.post("/api/admin/corners/ingest-csv")
+def api_admin_corners_ingest_csv(
+    file: UploadFile | None = File(
+        default=None, description="Upload corners_actuals_2025_26.csv (date,home_team,away_team,home_corners,away_corners,total_corners)"
+    ),
+    url: Optional[str] = Query(
+        None, description="Optional: URL to fetch a corners_actuals_2025_26.csv"
+    ),
+):
+    """Ingest a prepared corners_actuals_2025_26.csv, reload store, and append per-league CSVs.
+
+    Useful when network fetch is blocked. Provide either a file upload or a URL.
+    """
+    try:
+        if not file and not url:
+            raise HTTPException(status_code=400, detail="Provide a file or url")
+        target = Path("data") / "corners_actuals_2025_26.csv"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if url:
+            r = _requests.get(url, timeout=60)
+            r.raise_for_status()
+            target.write_bytes(r.content)
+        else:
+            content = file.file.read() if file else b""
+            if not content:
+                raise HTTPException(status_code=400, detail="Empty file")
+            target.write_bytes(content)
+        # Reload store and append to league-specific corners_actuals CSVs
+        reload_corners_store()
+        file_map = {
+            "PL": "football_data_PL_2025_2026.json",
+            "BL1": "football_data_BL1_2025_2026.json",
+            "FL1": "football_data_FL1_2025_2026.json",
+            "SA": "football_data_SA_2025_2026.json",
+            "PD": "football_data_PD_2025_2026.json",
+        }
+        totals = {}
+        for lg, fname in file_map.items():
+            p = Path("data") / fname
+            payload = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+            fixtures = payload.get("converted_fixtures") or []
+            totals[lg] = append_corners_actuals_from_store(lg, fixtures)
+        return {"success": True, "written": totals, "path": str(target)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Corners ingest failed: {e}")
 
 
 @app.post("/api/cron/results/snapshot-csv")
