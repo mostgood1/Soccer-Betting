@@ -1288,7 +1288,11 @@ async def get_upcoming_odds(
     ),
     limit: int = Query(8, ge=1, le=20),
     prefetch: bool = Query(
-        True, description="Prefetch providers before resolving match odds"
+        False, description="Prefetch providers before resolving match odds"
+    ),
+    cache_only: bool = Query(
+        True,
+        description="If true, do not make provider network calls; use cache/snapshots only",
     ),
 ):
     """Get upcoming-week odds for each requested league (or ALL).
@@ -1391,7 +1395,7 @@ async def get_upcoming_odds(
                     dt = m.get("date") or m.get("utc_date")
                     if not (home and away):
                         continue
-                    odds = betting_odds_service.get_match_odds(home, away, dt)
+                    odds = betting_odds_service.get_match_odds(home, away, dt, cache_only=cache_only)
                     rows.append(
                         {"home_team": home, "away_team": away, "date": dt, "odds": odds}
                     )

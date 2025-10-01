@@ -237,6 +237,7 @@ class BettingOddsService:
         away_team: str,
         match_date: str = None,
         prefer_bovada_only: bool = False,
+        cache_only: bool = False,
     ) -> Dict:
         """Get real betting odds for a specific match.
         Tries Bovada first (primary). If no Bovada event is found, falls back to The Odds API (H2H).
@@ -254,7 +255,7 @@ class BettingOddsService:
 
         # 1) Try Bovada first (primary across supported leagues)
         try:
-            bov_ev = self._get_bovada_event(n_home, n_away, match_date)
+            bov_ev = self._get_bovada_event(n_home, n_away, match_date, no_fetch=cache_only)
         except Exception:
             bov_ev = None
         if bov_ev:
@@ -264,7 +265,7 @@ class BettingOddsService:
                 odds = None
 
         # 2) If Bovada missing, optionally skip external fallback for speed
-        if not odds and not prefer_bovada_only:
+        if not odds and not prefer_bovada_only and not cache_only:
             api_odds = self._lookup_the_odds_api(n_home, n_away)
             if not api_odds and (
                 ("manchester" in n_home.lower()) or ("manchester" in n_away.lower())
@@ -547,7 +548,7 @@ class BettingOddsService:
 
     # ---------- Helpers ----------
     def _get_bovada_event(
-        self, home: str, away: str, match_date: Optional[str] = None
+        self, home: str, away: str, match_date: Optional[str] = None, no_fetch: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Fetch Bovada snapshots (cached) for supported leagues and return a matching event for home/away.
         If match_date is provided (ISO8601), prefer events within +/- 3 days of that date.
@@ -593,19 +594,18 @@ class BettingOddsService:
             snap = self._bovada_cache.get(key)
             now_loc = datetime.now()
             if not snap or not exp or now_loc >= exp:
-                try:
-                    s = fetcher()
-                except Exception:
-                    s = None
-                if isinstance(s, dict) and "events" in s and (s.get("events") or []):
+                s = None
+                if not no_fetch:
+                    try:
+                        s = fetcher()
+                    except Exception:
+                        s = None
+                if not isinstance(s, dict) or "events" not in (s or {}) or not (s.get("events") or []):
+                    # Fallback to persisted snapshot if available
+                    s = _load_persisted(key)
+                if isinstance(s, dict) and "events" in s:
                     self._bovada_cache[key] = s
                     self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
-                else:
-                    # Fallback to persisted snapshot if available
-                    s2 = _load_persisted(key)
-                    if s2:
-                        self._bovada_cache[key] = s2
-                        self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
 
         _ensure_or_load("PL", fetch_pl_odds)
         _ensure_or_load("BL1", fetch_bl1_odds)
