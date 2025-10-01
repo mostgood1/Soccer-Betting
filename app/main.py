@@ -1306,6 +1306,7 @@ async def get_upcoming_odds(
         # Optional provider prefetch to load snapshots eagerly
         if prefetch:
             try:
+                # prefetch Bovada with EU first (service is already EU-first)
                 betting_odds_service.prefetch_bovada()
             except Exception:
                 pass

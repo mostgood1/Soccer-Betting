@@ -40,6 +40,7 @@ class BettingOddsService:
 
     def __init__(self):
         self.odds_api_key = os.getenv("ODDS_API_KEY")
+        self.prefer_eu = os.getenv("BOVADA_PREFER_EU", "1") == "1"
         # Cache for odds data and indexes (per-match built structures)
         self.cache: Dict[str, Any] = {}
         self.cache_expiry: Dict[str, datetime] = {}
@@ -195,13 +196,13 @@ class BettingOddsService:
             except Exception as e:
                 out[key] = f"error: {e}"
 
-        _do("PL", fetch_pl_odds)
-        _do("BL1", fetch_bl1_odds)
-        _do("FL1", fetch_fl1_odds)
-        _do("SA", fetch_sa_odds)
-        _do("PD", fetch_pd_odds)
-        # As a catch-all, also cache Europe-wide coupon; this can contain all top leagues
-        _do("EU", fetch_eu_odds)
+    # Prefer EU aggregator first for broader coverage
+    _do("EU", fetch_eu_odds)
+    _do("PL", fetch_pl_odds)
+    _do("BL1", fetch_bl1_odds)
+    _do("FL1", fetch_fl1_odds)
+    _do("SA", fetch_sa_odds)
+    _do("PD", fetch_pd_odds)
         return {"provider": "bovada", "events": out}
 
     def _decimal_to_american(self, decimal_odds: float) -> int:
@@ -607,13 +608,13 @@ class BettingOddsService:
                     self._bovada_cache[key] = s
                     self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
 
-        _ensure_or_load("PL", fetch_pl_odds)
-        _ensure_or_load("BL1", fetch_bl1_odds)
-        _ensure_or_load("FL1", fetch_fl1_odds)
-        _ensure_or_load("SA", fetch_sa_odds)
-        _ensure_or_load("PD", fetch_pd_odds)
-        # Europe-wide fallback for broader coverage
-        _ensure_or_load("EU", fetch_eu_odds)
+    # Always keep EU available
+    _ensure_or_load("EU", fetch_eu_odds)
+    _ensure_or_load("PL", fetch_pl_odds)
+    _ensure_or_load("BL1", fetch_bl1_odds)
+    _ensure_or_load("FL1", fetch_fl1_odds)
+    _ensure_or_load("SA", fetch_sa_odds)
+    _ensure_or_load("PD", fetch_pd_odds)
         # Allow a date proximity filter to reduce false matches across far future/past fixtures
         target_dt: Optional[datetime] = None
         if match_date:
@@ -633,7 +634,21 @@ class BettingOddsService:
             except Exception:
                 return True
 
-        for snap in self._bovada_cache.values():
+        # Iterate snaps preferring EU first for best coverage
+        preferred = ["EU", "PL", "BL1", "FL1", "SA", "PD"] if self.prefer_eu else ["PL", "BL1", "FL1", "SA", "PD", "EU"]
+        seen = set()
+        ordered_keys = []
+        for k in preferred:
+            if k in self._bovada_cache and k not in seen:
+                ordered_keys.append(k)
+                seen.add(k)
+        # append any remaining caches
+        for k in list(self._bovada_cache.keys()):
+            if k not in seen:
+                ordered_keys.append(k)
+                seen.add(k)
+        for key in ordered_keys:
+            snap = self._bovada_cache.get(key) or {}
             evs = (snap or {}).get("events") or []
             for ev in evs:
                 if not _date_ok(ev):

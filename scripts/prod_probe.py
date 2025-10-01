@@ -167,8 +167,8 @@ def main() -> int:
 
     # Optional: upcoming (if deployed route exists)
     def odds_upcoming():
-        # Use a lighter call (no prefetch) and allow a longer timeout on Render
-        r = _get(base, "/api/betting/odds/upcoming?prefetch=false&limit=5", timeout=60)
+        # Use cache-only and include odds to validate EU aggregator coverage
+        r = _get(base, "/api/betting/odds/upcoming?prefetch=false&limit=5&include_odds=true&cache_only=true", timeout=60)
         print(r.status_code, r.text[:300])
         if r.status_code == 404:
             print("[warn] upcoming route not present on this deployment")
