@@ -40,12 +40,14 @@ def _hdrs(token: Optional[str]) -> Dict[str, str]:
 
 def _get(base: str, path: str, token: Optional[str] = None, **kwargs) -> requests.Response:
     url = base.rstrip("/") + path
-    return requests.get(url, headers=_hdrs(token), timeout=30, **kwargs)
+    timeout = kwargs.pop("timeout", 30)
+    return requests.get(url, headers=_hdrs(token), timeout=timeout, **kwargs)
 
 
 def _post(base: str, path: str, token: Optional[str] = None, **kwargs) -> requests.Response:
     url = base.rstrip("/") + path
-    return requests.post(url, headers=_hdrs(token), timeout=60, **kwargs)
+    timeout = kwargs.pop("timeout", 60)
+    return requests.post(url, headers=_hdrs(token), timeout=timeout, **kwargs)
 
 
 def main() -> int:
