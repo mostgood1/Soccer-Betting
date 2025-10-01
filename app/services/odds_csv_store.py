@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from datetime import datetime, timedelta
 import os
+from .corners_actuals_service import corners_actuals_store
 
 
 BASE_DIR = Path("data/odds_history")
@@ -136,6 +137,101 @@ def append_h2h_from_bovada(
                 )
                 count += 1
     return count
+
+
+def append_totals_from_bovada(
+    league: str, events: Iterable[Dict[str, Any]], week: Optional[int] = None
+) -> int:
+    """Append Totals (goals) O/U rows from Bovada parsed events.
+
+    Each event may include a list under 'totals' with items like:
+      { 'line': 2.5, 'over_prob': 0.52, 'under_prob': 0.48 }
+
+    We persist both Over and Under outcomes with implied probabilities and decimal odds (1/p) when available.
+    """
+    path = _csv_path(league, "totals")
+    _ensure_file(path)
+    now = _ts()
+    cnt = 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        for ev in events or []:
+            home = ev.get("home_team")
+            away = ev.get("away_team")
+            if not (home and away):
+                continue
+            ct = ev.get("commence_time")
+            if not ct:
+                ms = ev.get("start_time_ms")
+                if isinstance(ms, int):
+                    try:
+                        ct = (
+                            datetime.utcfromtimestamp(ms / 1000)
+                            .isoformat()
+                            .replace("+00:00", "Z")
+                        )
+                    except Exception:
+                        ct = None
+            match_date = ct.split("T")[0] if isinstance(ct, str) and "T" in ct else ""
+            totals = ev.get("totals") or []
+            for t in totals:
+                try:
+                    line = float(t.get("line")) if t.get("line") is not None else None
+                except Exception:
+                    line = None
+                over_p = t.get("over_prob")
+                under_p = t.get("under_prob")
+                if line is None or (over_p is None and under_p is None):
+                    continue
+                # Write Over
+                if isinstance(over_p, (int, float)) and over_p > 0:
+                    dec = round(1.0 / float(over_p), 4)
+                    w.writerow(
+                        [
+                            now,
+                            league,
+                            week if week is not None else "",
+                            "bovada",
+                            "bovada",
+                            match_date,
+                            ct or "",
+                            home,
+                            away,
+                            "totals",
+                            "over",
+                            line,
+                            dec,
+                            "",
+                            round(float(over_p), 6),
+                            "",
+                        ]
+                    )
+                    cnt += 1
+                # Write Under
+                if isinstance(under_p, (int, float)) and under_p > 0:
+                    dec = round(1.0 / float(under_p), 4)
+                    w.writerow(
+                        [
+                            now,
+                            league,
+                            week if week is not None else "",
+                            "bovada",
+                            "bovada",
+                            match_date,
+                            ct or "",
+                            home,
+                            away,
+                            "totals",
+                            "under",
+                            line,
+                            dec,
+                            "",
+                            round(float(under_p), 6),
+                            "",
+                        ]
+                    )
+                    cnt += 1
+    return cnt
 
 
 def append_h2h_from_oddsapi(
@@ -265,6 +361,370 @@ def append_h2h_from_oddsapi(
                             ]
                         )
                         cnt += 1
+    return cnt
+
+
+def append_totals_from_oddsapi(
+    league: str,
+    payload: Dict[str, Any],
+    week: Optional[int] = None,
+    bookmaker_filter: Optional[List[str]] = None,
+) -> int:
+    """Append Totals (goals) O/U rows from The Odds API normalized payload.
+
+    Supports both shapes:
+      - events[].bookmakers[].markets[] with key == "totals" and outcomes with price/point
+      - records[] (aggregated) with bookmakers[].markets[] structure
+    """
+    path = _csv_path(league, "totals")
+    _ensure_file(path)
+    now = _ts()
+    cnt = 0
+    bk_set = {b.lower() for b in bookmaker_filter} if bookmaker_filter else None
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        # Case A: payload with events list
+        for ev in payload.get("events") or []:
+            home = ev.get("home_team")
+            away = ev.get("away_team")
+            ct = ev.get("commence_time")
+            if not (home and away and ct):
+                continue
+            match_date = ct.split("T")[0] if isinstance(ct, str) and "T" in ct else ""
+            for bm in ev.get("bookmakers") or []:
+                key = (bm.get("key") or bm.get("title") or "").lower()
+                if bk_set and key not in bk_set:
+                    continue
+                for mk in bm.get("markets") or []:
+                    if mk.get("key") != "totals":
+                        continue
+                    over = mk.get("overround")
+                    for o in mk.get("outcomes") or []:
+                        name = (o.get("name") or "").lower()
+                        outcome = "over" if "over" in name else ("under" if "under" in name else None)
+                        if not outcome:
+                            continue
+                        try:
+                            price = float(o.get("price")) if o.get("price") is not None else None
+                        except Exception:
+                            price = None
+                        try:
+                            line = float(o.get("point")) if o.get("point") is not None else None
+                        except Exception:
+                            line = None
+                        if line is None:
+                            continue
+                        ip = (1.0 / price) if (isinstance(price, (int, float)) and price and price > 1.0) else None
+                        w.writerow(
+                            [
+                                now,
+                                league,
+                                week if week is not None else "",
+                                "the-odds-api",
+                                key or "unknown",
+                                match_date,
+                                ct,
+                                home,
+                                away,
+                                "totals",
+                                outcome,
+                                line,
+                                price if isinstance(price, (int, float)) else "",
+                                "",
+                                round(ip, 6) if isinstance(ip, float) else "",
+                                over if isinstance(over, (int, float)) else "",
+                            ]
+                        )
+                        cnt += 1
+        # Case B: payload with records list
+        for rec in payload.get("records") or []:
+            home = rec.get("home_team")
+            away = rec.get("away_team")
+            ct = rec.get("commence_time")
+            if not (home and away and ct):
+                continue
+            match_date = ct.split("T")[0] if isinstance(ct, str) and "T" in ct else ""
+            for bm in rec.get("bookmakers") or []:
+                key = (bm.get("key") or bm.get("name") or bm.get("title") or "").lower()
+                if bk_set and key not in bk_set:
+                    continue
+                for mk in bm.get("markets") or []:
+                    if mk.get("key") != "totals":
+                        continue
+                    over = mk.get("overround")
+                    for o in mk.get("outcomes") or []:
+                        name = (o.get("name") or "").lower()
+                        outcome = "over" if "over" in name else ("under" if "under" in name else None)
+                        if not outcome:
+                            continue
+                        try:
+                            price = float(o.get("price")) if o.get("price") is not None else None
+                        except Exception:
+                            price = None
+                        try:
+                            line = float(o.get("point")) if o.get("point") is not None else None
+                        except Exception:
+                            line = None
+                        if line is None:
+                            continue
+                        ip = (1.0 / price) if (isinstance(price, (int, float)) and price and price > 1.0) else None
+                        w.writerow(
+                            [
+                                now,
+                                league,
+                                week if week is not None else "",
+                                "the-odds-api",
+                                key or "unknown",
+                                match_date,
+                                ct,
+                                home,
+                                away,
+                                "totals",
+                                outcome,
+                                line,
+                                price if isinstance(price, (int, float)) else "",
+                                "",
+                                round(ip, 6) if isinstance(ip, float) else "",
+                                over if isinstance(over, (int, float)) else "",
+                            ]
+                        )
+                        cnt += 1
+    return cnt
+
+
+# -------- Results CSV (final scores) ---------
+RESULTS_HEADER = [
+    "timestamp",
+    "league",
+    "week",
+    "match_date",
+    "commence_time",
+    "home_team",
+    "away_team",
+    "home_score",
+    "away_score",
+    "result",
+    "status",
+    "source",
+]
+
+
+def _csv_results_path(league: str) -> Path:
+    code = (league or "PL").upper()
+    return BASE_DIR / f"results_{code}.csv"
+
+
+def append_results_from_fixtures(
+    league: str, fixtures: Iterable[Dict[str, Any]], week: Optional[int] = None
+) -> int:
+    """Append final results rows from fixtures (Football-Data.org converted fixtures shape).
+
+    Expects each fixture with keys: home_team, away_team, utc_date, home_score, away_score, status, matchday
+    Rows are appended when scores are present (completed) or status indicates completion.
+    """
+    path = _csv_results_path(league)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(RESULTS_HEADER)
+    now = _ts()
+    cnt = 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        for m in fixtures or []:
+            home = m.get("home_team") or (m.get("homeTeam") or {}).get("name")
+            away = m.get("away_team") or (m.get("awayTeam") or {}).get("name")
+            ct = m.get("utc_date") or m.get("date")
+            status = (m.get("status") or "").upper()
+            hs = m.get("home_score")
+            as_ = m.get("away_score")
+            if home is None or away is None or ct is None:
+                continue
+            # Only write for completed matches (status or scores present)
+            is_done = status in ("FINISHED", "COMPLETED") or (
+                hs is not None and as_ is not None
+            )
+            if not is_done:
+                continue
+            date = ct.split("T")[0] if isinstance(ct, str) and "T" in ct else (ct or "")
+            try:
+                wk = int(m.get("matchday")) if m.get("matchday") is not None else (int(week) if week else "")
+            except Exception:
+                wk = week if week is not None else ""
+            # Determine categorical result
+            result = None
+            if isinstance(hs, int) and isinstance(as_, int):
+                if hs > as_:
+                    result = "H"
+                elif hs < as_:
+                    result = "A"
+                else:
+                    result = "D"
+            w.writerow(
+                [
+                    now,
+                    league,
+                    wk,
+                    date,
+                    ct or "",
+                    home,
+                    away,
+                    hs if hs is not None else "",
+                    as_ if as_ is not None else "",
+                    result or "",
+                    status,
+                    "football-data",
+                ]
+            )
+            cnt += 1
+    return cnt
+
+
+# -------- Goals Actuals (alias of results with total_goals) ---------
+GOALS_ACTUALS_HEADER = [
+    "timestamp",
+    "league",
+    "week",
+    "match_date",
+    "commence_time",
+    "home_team",
+    "away_team",
+    "home_goals",
+    "away_goals",
+    "total_goals",
+    "result",
+    "status",
+    "source",
+]
+
+
+def _csv_goals_actuals_path(league: str) -> Path:
+    code = (league or "PL").upper()
+    return BASE_DIR / f"goals_actuals_{code}.csv"
+
+
+def append_goals_actuals_from_fixtures(
+    league: str, fixtures: Iterable[Dict[str, Any]], week: Optional[int] = None
+) -> int:
+    path = _csv_goals_actuals_path(league)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(GOALS_ACTUALS_HEADER)
+    now = _ts()
+    cnt = 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        for m in fixtures or []:
+            home = m.get("home_team") or (m.get("homeTeam") or {}).get("name")
+            away = m.get("away_team") or (m.get("awayTeam") or {}).get("name")
+            ct = m.get("utc_date") or m.get("date")
+            status = (m.get("status") or "").upper()
+            hs = m.get("home_score")
+            as_ = m.get("away_score")
+            if not (home and away and ct):
+                continue
+            is_done = status in ("FINISHED", "COMPLETED") or (hs is not None and as_ is not None)
+            if not is_done:
+                continue
+            date = ct.split("T")[0] if isinstance(ct, str) and "T" in ct else (ct or "")
+            try:
+                wk = int(m.get("matchday")) if m.get("matchday") is not None else (int(week) if week else "")
+            except Exception:
+                wk = week if week is not None else ""
+            total = (hs + as_) if (isinstance(hs, int) and isinstance(as_, int)) else None
+            result = None
+            if isinstance(hs, int) and isinstance(as_, int):
+                if hs > as_:
+                    result = "H"
+                elif hs < as_:
+                    result = "A"
+                else:
+                    result = "D"
+            w.writerow(
+                [
+                    now,
+                    league,
+                    wk,
+                    date,
+                    ct or "",
+                    home,
+                    away,
+                    hs if hs is not None else "",
+                    as_ if as_ is not None else "",
+                    total if total is not None else "",
+                    result or "",
+                    status,
+                    "football-data",
+                ]
+            )
+            cnt += 1
+    return cnt
+
+
+# -------- Corners Actuals (from store) ---------
+CORNERS_ACTUALS_HEADER = [
+    "timestamp",
+    "league",
+    "week",
+    "match_date",
+    "commence_time",
+    "home_team",
+    "away_team",
+    "home_corners",
+    "away_corners",
+    "total_corners",
+    "source",
+]
+
+
+def _csv_corners_actuals_path(league: str) -> Path:
+    code = (league or "PL").upper()
+    return BASE_DIR / f"corners_actuals_{code}.csv"
+
+
+def append_corners_actuals_from_store(
+    league: str, fixtures: Iterable[Dict[str, Any]], week: Optional[int] = None
+) -> int:
+    path = _csv_corners_actuals_path(league)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(CORNERS_ACTUALS_HEADER)
+    now = _ts()
+    cnt = 0
+    with path.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        for m in fixtures or []:
+            home = m.get("home_team") or (m.get("homeTeam") or {}).get("name")
+            away = m.get("away_team") or (m.get("awayTeam") or {}).get("name")
+            ct = m.get("utc_date") or m.get("date")
+            if not (home and away and ct):
+                continue
+            date = ct.split("T")[0] if isinstance(ct, str) and "T" in ct else (ct or "")
+            rec = corners_actuals_store.lookup(date, home, away)
+            if not rec:
+                continue
+            try:
+                wk = int(m.get("matchday")) if m.get("matchday") is not None else (int(week) if week else "")
+            except Exception:
+                wk = week if week is not None else ""
+            w.writerow(
+                [
+                    now,
+                    league,
+                    wk,
+                    date,
+                    ct or "",
+                    rec.get("home_team") or home,
+                    rec.get("away_team") or away,
+                    rec.get("home_corners"),
+                    rec.get("away_corners"),
+                    rec.get("total_corners"),
+                    "fbref-or-manual",
+                ]
+            )
+            cnt += 1
     return cnt
 
 

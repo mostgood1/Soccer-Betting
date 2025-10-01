@@ -2,11 +2,13 @@
 FBref Corners Importer
 ----------------------
 Attempts to fetch real corners actuals from FBref via the soccerdata library
-for specified EPL game weeks, keyed by date/home/away, and writes them to
-data/corners_actuals_2025_26.csv for consumption by corners_actuals_store.
+for specified league game weeks (PL, BL1, FL1, SA, PD), keyed by date/home/away,
+and writes them to data/corners_actuals_2025_26.csv for consumption by
+corners_actuals_store.
 
 Usage:
-    python -m app.tools.fetch_corners_fbref --weeks 1,2,3 [--out data/corners_actuals_2025_26.csv] [--use-fbref]
+        python -m app.tools.fetch_corners_fbref --league BL1 --weeks 1,2,3 \
+            [--out data/corners_actuals_2025_26.csv] [--use-fbref]
 
 Notes:
  - Primary path (offline-friendly): reads local Football-Data.co.uk CSVs that
@@ -32,7 +34,7 @@ try:
 except Exception as e:  # pragma: no cover
     sd = None  # type: ignore
 
-from app.services.enhanced_epl_service_v2 import EnhancedEPLService
+from app.services.league_manager import get_service as get_league_service, normalize_league_code
 from app.services.game_week_service import game_week_service
 from app.services.team_name_normalizer import normalize_team_name
 
@@ -109,6 +111,51 @@ def _gather_fbref_corners() -> Optional[pd.DataFrame]:
         return None
     # Prefer the first usable candidate
     return candidates[0]
+
+
+def _filter_by_competition(df: pd.DataFrame, league_code: str) -> pd.DataFrame:
+    """Best-effort filter of FBref team-match stats for a specific league.
+
+    We search for a column that identifies competition/league/country and filter by
+    known names per league code. If no such column is found, return df unchanged.
+    """
+    try:
+        code = normalize_league_code(league_code)
+    except Exception:
+        code = league_code
+    comp_map = {
+        "PL": ["Premier League", "England"],
+        "BL1": ["Bundesliga", "Germany"],
+        "FL1": ["Ligue 1", "France"],
+        "SA": ["Serie A", "Italy"],
+        "PD": ["La Liga", "Spain", "Primera Division"],
+    }
+    synonyms = comp_map.get(code, [])
+    if not isinstance(df, pd.DataFrame) or df.empty or not synonyms:
+        return df
+    # Find a likely competition column
+    cols = list(df.columns)
+    cand_cols = [
+        c
+        for c in cols
+        if any(k in str(c).lower() for k in ["comp", "league", "competition", "country"])
+    ]
+    if not cand_cols:
+        return df
+    # OR-filter rows containing any synonym in any candidate column
+    mask = pd.Series([False] * len(df))
+    for c in cand_cols:
+        try:
+            ser = df[c].astype(str).str.lower()
+            for s in synonyms:
+                mask = mask | ser.str.contains(str(s).lower(), na=False)
+        except Exception:
+            continue
+    try:
+        out = df.loc[mask]
+        return out if not out.empty else df
+    except Exception:
+        return df
 
 
 def _scan_local_football_data_csvs() -> List[str]:
@@ -207,16 +254,22 @@ def _lookup_match_corners(
 
 
 def import_weeks(
-    weeks: Iterable[int], out_path: str, use_fbref: bool = False
+    weeks: Iterable[int], out_path: str, use_fbref: bool = False, league: str = "PL"
 ) -> Dict[str, Any]:
-    svc = EnhancedEPLService()
-    matches = svc.get_all_matches()
+    code = normalize_league_code(league)
+    svc = get_league_service(code)
+    # Prefer get_all_matches if available; else fallback to EPL service signature
+    matches = (
+        svc.get_all_matches() if hasattr(svc, "get_all_matches") else svc.get_matches()
+    )
     weeks_map = game_week_service.organize_matches_by_week(matches)
     # Try local Football-Data CSVs first (offline-friendly)
     local_csvs = _scan_local_football_data_csvs()
     fbref_df = None
     if use_fbref:
         fbref_df = _gather_fbref_corners()
+        if fbref_df is not None:
+            fbref_df = _filter_by_competition(fbref_df, code)
 
     existing = _read_existing_csv(out_path)
     written = 0
@@ -286,6 +339,7 @@ def import_weeks(
         "weeks": list(weeks),
         "considered": considered,
         "wrote": written,
+        "league": code,
         "out": out_path,
     }
 
@@ -293,6 +347,12 @@ def import_weeks(
 def main():
     parser = argparse.ArgumentParser(
         description="Import corners actuals from FBref via soccerdata"
+    )
+    parser.add_argument(
+        "--league",
+        type=str,
+        default="PL",
+        help="League code: PL, BL1, FL1, SA, PD (default: PL)",
     )
     parser.add_argument(
         "--weeks",
@@ -312,8 +372,29 @@ def main():
         help="Allow FBref network fetch if local CSVs are unavailable",
     )
     args = parser.parse_args()
-    weeks = [int(w.strip()) for w in args.weeks.split(",") if w.strip()]
-    result = import_weeks(weeks, args.out, use_fbref=bool(args.use_fbref))
+    # Support ranges like 1-5,7,9-10
+    raw = [s.strip() for s in str(args.weeks).split(",") if s.strip()]
+    weeks_list: List[int] = []
+    for token in raw:
+        if "-" in token:
+            try:
+                a, b = token.split("-", 1)
+                a_i = int(a); b_i = int(b)
+                if a_i <= b_i:
+                    weeks_list.extend(list(range(a_i, b_i + 1)))
+                else:
+                    weeks_list.extend(list(range(b_i, a_i + 1)))
+            except Exception:
+                continue
+        else:
+            try:
+                weeks_list.append(int(token))
+            except Exception:
+                continue
+    weeks = sorted(set(weeks_list))
+    result = import_weeks(
+        weeks, args.out, use_fbref=bool(args.use_fbref), league=str(args.league)
+    )
     print(result)
 
 

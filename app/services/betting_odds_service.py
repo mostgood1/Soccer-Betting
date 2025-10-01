@@ -150,7 +150,7 @@ class BettingOddsService:
             pass
         out = {}
         now = datetime.now()
-        # Only keep events in the next N days for soccer
+        # Only keep events in the next N days for soccer; also keep a small lookback window
         try:
             window_days = int(os.getenv("BOVADA_WINDOW_DAYS", "14"))
             if window_days < 0:
@@ -158,6 +158,13 @@ class BettingOddsService:
         except Exception:
             window_days = 14
         window_end = now + timedelta(days=window_days)
+        try:
+            lookback_hours = int(os.getenv("BOVADA_LOOKBACK_HOURS", "120"))
+            if lookback_hours < 0:
+                lookback_hours = 0
+        except Exception:
+            lookback_hours = 12
+        window_start = now - timedelta(hours=lookback_hours)
 
         def _in_window(ev: Dict[str, Any]) -> bool:
             ts = ev.get("start_time_ms")
@@ -165,7 +172,7 @@ class BettingOddsService:
                 return False
             try:
                 ev_dt = datetime.fromtimestamp(ts / 1000)
-                return now <= ev_dt <= window_end
+                return window_start <= ev_dt <= window_end
             except Exception:
                 return False
 

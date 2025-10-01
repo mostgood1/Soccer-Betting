@@ -3,6 +3,8 @@ Centralizes canonical mapping so odds, predictions, and UI use consistent names.
 """
 from __future__ import annotations
 from typing import Dict, Optional
+import os
+import json
 import unicodedata
 
 NORMALIZATION_MAP: Dict[str, str] = {
@@ -231,6 +233,51 @@ def canonical_pair(home: str, away: str) -> str:
     h = normalize_team_name(home) or home
     a = normalize_team_name(away) or away
     return f"{h}|{a}".lower()
+
+
+def _repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _load_external_aliases() -> None:
+    """Merge alias maps from data/team_aliases*.json into NORMALIZATION_MAP.
+
+    Files checked (if exist):
+      - data/team_aliases.json (global)
+      - data/team_aliases_PL.json, _BL1.json, _FL1.json, _SA.json, _PD.json
+    Keys are case-insensitive; we store lowercase stripped keys without diacritics.
+    """
+    root = _repo_root()
+    data_dir = os.path.join(root, "data")
+    files = [
+        os.path.join(data_dir, "team_aliases.json"),
+        os.path.join(data_dir, "team_aliases_PL.json"),
+        os.path.join(data_dir, "team_aliases_BL1.json"),
+        os.path.join(data_dir, "team_aliases_FL1.json"),
+        os.path.join(data_dir, "team_aliases_SA.json"),
+        os.path.join(data_dir, "team_aliases_PD.json"),
+    ]
+    for fp in files:
+        try:
+            if not os.path.exists(fp):
+                continue
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if not isinstance(k, str) or not isinstance(v, str):
+                        continue
+                    key = _strip_diacritics(k.strip().lower())
+                    NORMALIZATION_MAP[key] = v.strip()
+        except Exception:
+            continue
+
+
+# Load external alias files at import time (best-effort)
+try:
+    _load_external_aliases()
+except Exception:
+    pass
 
 
 __all__ = ["normalize_team_name", "NORMALIZATION_MAP", "canonical_pair"]

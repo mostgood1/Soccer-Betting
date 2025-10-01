@@ -23,11 +23,89 @@ class EnhancedPlayerStatsService:
         self.real_only = os.getenv("REAL_DATA_ONLY", "1") == "1"
         if self.real_only:
             self.is_mock = False
-            self.is_available = False
-            self.players_data = []
-            print(
-                f"Enhanced Player Stats Service (REAL_DATA_ONLY): no player stats provider configured; returning empty data"
-            )
+            # Try to load from fbrefdata artifacts if available
+            try:
+                from .fbrefdata_service import fbrefdata_service  # lazy import
+
+                season_slug = self._season_slug()
+                # Default to PL for now; later can be per-league
+                base = fbrefdata_service.base_dir / "PL" / season_slug
+                players = []
+                if base.exists():
+                    import pandas as pd  # type: ignore
+
+                    std_path = base / "players_standard.csv"
+                    shoot_path = base / "players_shooting.csv"
+                    frames = []
+                    if std_path.exists():
+                        try:
+                            frames.append(pd.read_csv(std_path))
+                        except Exception:
+                            pass
+                    if shoot_path.exists():
+                        try:
+                            frames.append(pd.read_csv(shoot_path))
+                        except Exception:
+                            pass
+                    if frames:
+                        # Merge on a couple of keys when possible
+                        try:
+                            df = frames[0]
+                            for f in frames[1:]:
+                                common_cols = [c for c in ("Player", "Squad", "Pos") if c in df.columns and c in f.columns]
+                                if common_cols:
+                                    df = df.merge(f, on=common_cols, how="outer", suffixes=("", "_y"))
+                                else:
+                                    df = df
+                            # Normalize to our schema subset
+                            for _, row in df.iterrows():
+                                name = str(row.get("Player") or "").strip()
+                                team = str(row.get("Squad") or "").strip()
+                                pos = str(row.get("Pos") or "").strip()
+                                goals = int(row.get("Gls", 0)) if pd.notna(row.get("Gls")) else 0
+                                ast = int(row.get("Ast", 0)) if pd.notna(row.get("Ast")) else 0
+                                shots = int(row.get("Sh", 0)) if pd.notna(row.get("Sh")) else 0
+                                sot = int(row.get("SoT", 0)) if pd.notna(row.get("SoT")) else 0
+                                if name:
+                                    players.append({
+                                        "name": name,
+                                        "team": team or "",
+                                        "position": pos or "",
+                                        "age": int(row.get("Age", 0)) if pd.notna(row.get("Age")) else 0,
+                                        "season": self.season,
+                                        "games_played": int(row.get("MP", 0)) if pd.notna(row.get("MP")) else 0,
+                                        "minutes_played": int(row.get("Min", 0)) if pd.notna(row.get("Min")) else 0,
+                                        "goals": goals,
+                                        "assists": ast,
+                                        "shots": shots,
+                                        "shots_on_target": sot,
+                                        "yellow_cards": int(row.get("CrdY", 0)) if pd.notna(row.get("CrdY")) else 0,
+                                        "red_cards": int(row.get("CrdR", 0)) if pd.notna(row.get("CrdR")) else 0,
+                                        "average_rating": 0.0,
+                                        "form_rating": 0.0,
+                                        "pass_accuracy": 0.0,
+                                        "goals_per_game": round(goals / max(int(row.get("MP", 0)) or 1, 1), 2),
+                                        "assists_per_game": round(ast / max(int(row.get("MP", 0)) or 1, 1), 2),
+                                        "minutes_per_goal": 0,
+                                        "minutes_per_assist": 0,
+                                        "market_value_millions": 0,
+                                        "injury_status": "fit",
+                                        "contract_expires": "",
+                                    })
+                        except Exception:
+                            players = []
+                self.players_data = players
+                self.is_available = bool(players)
+                if not self.is_available:
+                    print(
+                        f"Enhanced Player Stats Service (REAL_DATA_ONLY): fbrefdata artifacts not found; returning empty data"
+                    )
+            except Exception:
+                self.is_available = False
+                self.players_data = []
+                print(
+                    f"Enhanced Player Stats Service (REAL_DATA_ONLY): no player stats provider configured; returning empty data"
+                )
         else:
             # NOTE: In non-real-only mode, this service generates synthetic player stats
             self.is_mock = True
@@ -36,6 +114,15 @@ class EnhancedPlayerStatsService:
             print(
                 f"Enhanced Player Stats Service initialized for {self.season} (mock stats)"
             )
+
+    def _season_slug(self) -> str:
+        # Convert 2025-26 -> 2025-2026 for folder naming used by fbrefdata service
+        try:
+            start, end = self.season.split("-")
+            end_full = str(int(start) + 1)
+            return f"{start}-{end_full}"
+        except Exception:
+            return self.season
 
     def _generate_comprehensive_player_stats(self) -> List[Dict]:
         """Generate comprehensive player statistics for EPL 2025-26"""
