@@ -1166,3 +1166,15 @@ def fetch_pd_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
         ],
         timeout=timeout,
     )
+
+
+def fetch_eu_odds(timeout: Optional[int] = None) -> Dict[str, Any]:
+    """Europe-wide soccer aggregator on Bovada.
+    Useful fallback when league-specific coupon endpoints are empty or unavailable.
+    """
+    return _fetch_bovada_multi(
+        [
+            "/soccer/europe",
+        ],
+        timeout=timeout,
+    )

@@ -1229,6 +1229,116 @@ async def get_match_betting_odds(home_team: str, away_team: str):
     return odds
 
 
+@app.get("/api/betting/odds/upcoming")
+async def get_upcoming_odds(
+    leagues: str = Query(
+        "ALL",
+        description="Comma-separated leagues (PL,BL1,FL1,SA,PD) or ALL",
+    ),
+    limit: int = Query(8, ge=1, le=20),
+    prefetch: bool = Query(
+        True, description="Prefetch providers before resolving match odds"
+    ),
+):
+    """Get upcoming-week odds for each requested league (or ALL).
+    Selects the next upcoming week per league by fixture dates and returns up to `limit` matches.
+    """
+    try:
+        # Optional provider prefetch to load snapshots eagerly
+        if prefetch:
+            try:
+                betting_odds_service.prefetch_bovada()
+            except Exception:
+                pass
+            try:
+                if betting_odds_service.odds_api_key:
+                    betting_odds_service.prefetch()
+            except Exception:
+                pass
+
+        wanted = (
+            [s.strip().upper() for s in leagues.split(",") if s.strip()]
+            if leagues and leagues.upper() != "ALL"
+            else ["PL", "BL1", "FL1", "SA", "PD"]
+        )
+        out = {}
+
+        from datetime import datetime, timezone, timedelta
+
+        def _parse_dt(m):
+            d = m.get("utc_date") or m.get("date")
+            if not d:
+                return None
+            try:
+                if isinstance(d, str):
+                    if d.endswith("Z"):
+                        return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                    return datetime.fromisoformat(d)
+                return d
+            except Exception:
+                return None
+
+        for lg in wanted:
+            try:
+                try:
+                    svc = get_league_service(lg)
+                except Exception:
+                    continue
+                matches = (
+                    svc.get_all_matches()
+                    if hasattr(svc, "get_all_matches")
+                    else enhanced_epl_service.get_all_matches()
+                )
+                weeks = game_week_service.organize_matches_by_week(matches)
+                now_dt = datetime.now(timezone.utc)
+                upcoming_weeks = []
+                for wnum, wmatches in weeks.items():
+                    for m in wmatches:
+                        dtm = _parse_dt(m)
+                        if dtm and dtm.tzinfo is None:
+                            dtm = dtm.replace(tzinfo=timezone.utc)
+                        if dtm and (dtm >= now_dt - timedelta(hours=12)) and (
+                            dtm <= now_dt + timedelta(days=10)
+                        ):
+                            upcoming_weeks.append(int(wnum))
+                            break
+                wk = (
+                    min(upcoming_weeks)
+                    if upcoming_weeks
+                    else (max(weeks.keys()) if weeks else None)
+                )
+                if not wk:
+                    out[lg] = {"week": None, "matches": []}
+                    continue
+                week_matches = weeks.get(wk, [])
+                rows = []
+                for m in week_matches[:limit]:
+                    home = (
+                        m.get("home_team")
+                        or m.get("homeTeam")
+                        or (m.get("home") or {}).get("name")
+                    )
+                    away = (
+                        m.get("away_team")
+                        or m.get("awayTeam")
+                        or (m.get("away") or {}).get("name")
+                    )
+                    dt = m.get("date") or m.get("utc_date")
+                    if not (home and away):
+                        continue
+                    odds = betting_odds_service.get_match_odds(home, away, dt)
+                    rows.append(
+                        {"home_team": home, "away_team": away, "date": dt, "odds": odds}
+                    )
+                out[lg] = {"week": wk, "count": len(rows), "matches": rows}
+            except Exception:
+                out[lg] = {"week": None, "matches": []}
+                continue
+        return {"leagues": out}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get upcoming odds: {e}")
+
+
 @app.post("/api/admin/odds/cache/clear")
 def api_admin_odds_cache_clear():
     """Clear odds caches (entry and per-sport snapshots). Useful to force-refresh live odds."""
@@ -1478,14 +1588,33 @@ def api_admin_edges_warm(
                 else enhanced_epl_service.get_all_matches()
             )
             weeks = game_week_service.organize_matches_by_week(matches)
-            # Determine current week; our GameWeekService.get_current_game_week()
-            # does not accept a league parameter, so call without args.
-            current_week = (
-                game_week_service.get_current_game_week()
-                if hasattr(game_week_service, "get_current_game_week")
-                else None
-            )
-            wk = current_week or max(weeks.keys()) if weeks else None
+            # Derive the next upcoming week for this league by real fixture dates,
+            # falling back to the maximum week if no upcoming fixtures are found.
+            from datetime import datetime, timezone, timedelta
+            now_dt = datetime.now(timezone.utc)
+            def _parse_dt(m):
+                d = m.get("utc_date") or m.get("date")
+                if not d:
+                    return None
+                try:
+                    if isinstance(d, str):
+                        if d.endswith("Z"):
+                            return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                        return datetime.fromisoformat(d)
+                    return d
+                except Exception:
+                    return None
+            upcoming_weeks = []
+            for wnum, wmatches in weeks.items():
+                for m in wmatches:
+                    dtm = _parse_dt(m)
+                    if dtm and dtm.tzinfo is None:
+                        dtm = dtm.replace(tzinfo=timezone.utc)
+                    # consider matches from a few hours in the past up to ~10 days ahead as "current cycle"
+                    if dtm and (dtm >= now_dt - timedelta(hours=12)) and (dtm <= now_dt + timedelta(days=10)):
+                        upcoming_weeks.append(int(wnum))
+                        break
+            wk = min(upcoming_weeks) if upcoming_weeks else (max(weeks.keys()) if weeks else None)
             cnt = 0
             if wk and weeks.get(wk):
                 for m in weeks[wk]:

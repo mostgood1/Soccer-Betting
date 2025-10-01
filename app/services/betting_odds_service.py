@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import time
 import logging
 from dotenv import load_dotenv
+from pathlib import Path
 
 from .the_odds_api_service import fetch_the_odds_api
 from .bovada_odds_service import (
@@ -24,6 +25,7 @@ from .bovada_odds_service import (
     fetch_fl1_odds,
     fetch_sa_odds,
     fetch_pd_odds,
+    fetch_eu_odds,
 )
 from .team_name_normalizer import normalize_team_name
 
@@ -49,6 +51,12 @@ class BettingOddsService:
         # Bovada snapshot caches per league
         self._bovada_cache: Dict[str, Dict[str, Any]] = {}
         self._bovada_cache_expiry: Dict[str, datetime] = {}
+        # On-disk snapshot location for Bovada
+        self._bovada_snap_dir = Path(os.getenv("BOVADA_SNAPSHOT_DIR", "data/odds_snapshots"))
+        try:
+            self._bovada_snap_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         # Supported sport keys map (covers PL, BL1, FL1, SA, PD)
         self.SPORT_KEYS = [
             "soccer_epl",
@@ -156,6 +164,15 @@ class BettingOddsService:
             except Exception:
                 return False
 
+        def _persist(key: str, snap: Dict[str, Any]) -> None:
+            try:
+                p = self._bovada_snap_dir / f"bovada_{key}.json"
+                payload = {"timestamp": datetime.now().isoformat(), "snapshot": snap}
+                with p.open("w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+            except Exception:
+                pass
+
         def _do(key: str, fetcher):
             try:
                 snap = fetcher()
@@ -171,6 +188,7 @@ class BettingOddsService:
                     self._bovada_cache_expiry[key] = now + timedelta(
                         seconds=self.cache_duration
                     )
+                    _persist(key, snap_f)
                     out[key] = len(filtered or [])
                 else:
                     out[key] = 0
@@ -182,6 +200,8 @@ class BettingOddsService:
         _do("FL1", fetch_fl1_odds)
         _do("SA", fetch_sa_odds)
         _do("PD", fetch_pd_odds)
+        # As a catch-all, also cache Europe-wide coupon; this can contain all top leagues
+        _do("EU", fetch_eu_odds)
         return {"provider": "bovada", "events": out}
 
     def _decimal_to_american(self, decimal_odds: float) -> int:
@@ -234,7 +254,7 @@ class BettingOddsService:
 
         # 1) Try Bovada first (primary across supported leagues)
         try:
-            bov_ev = self._get_bovada_event(n_home, n_away)
+            bov_ev = self._get_bovada_event(n_home, n_away, match_date)
         except Exception:
             bov_ev = None
         if bov_ev:
@@ -526,8 +546,12 @@ class BettingOddsService:
         }
 
     # ---------- Helpers ----------
-    def _get_bovada_event(self, home: str, away: str) -> Optional[Dict[str, Any]]:
-        """Fetch Bovada snapshots (cached) for supported leagues and return a matching event for home/away."""
+    def _get_bovada_event(
+        self, home: str, away: str, match_date: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch Bovada snapshots (cached) for supported leagues and return a matching event for home/away.
+        If match_date is provided (ISO8601), prefer events within +/- 3 days of that date.
+        """
         # Fast path for tests/CI: avoid network lookups
         try:
             if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
@@ -550,14 +574,70 @@ class BettingOddsService:
                         seconds=self.cache_duration
                     )
 
-        _ensure_cache("PL", fetch_pl_odds)
-        _ensure_cache("BL1", fetch_bl1_odds)
-        _ensure_cache("FL1", fetch_fl1_odds)
-        _ensure_cache("SA", fetch_sa_odds)
-        _ensure_cache("PD", fetch_pd_odds)
+        def _load_persisted(key: str) -> Optional[Dict[str, Any]]:
+            try:
+                p = self._bovada_snap_dir / f"bovada_{key}.json"
+                if not p.exists():
+                    return None
+                with p.open("r", encoding="utf-8") as f:
+                    doc = json.load(f)
+                snap = doc.get("snapshot") if isinstance(doc, dict) else None
+                if isinstance(snap, dict) and "events" in snap:
+                    return snap
+            except Exception:
+                return None
+            return None
+
+        def _ensure_or_load(key: str, fetcher):
+            exp = self._bovada_cache_expiry.get(key)
+            snap = self._bovada_cache.get(key)
+            now_loc = datetime.now()
+            if not snap or not exp or now_loc >= exp:
+                try:
+                    s = fetcher()
+                except Exception:
+                    s = None
+                if isinstance(s, dict) and "events" in s and (s.get("events") or []):
+                    self._bovada_cache[key] = s
+                    self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
+                else:
+                    # Fallback to persisted snapshot if available
+                    s2 = _load_persisted(key)
+                    if s2:
+                        self._bovada_cache[key] = s2
+                        self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
+
+        _ensure_or_load("PL", fetch_pl_odds)
+        _ensure_or_load("BL1", fetch_bl1_odds)
+        _ensure_or_load("FL1", fetch_fl1_odds)
+        _ensure_or_load("SA", fetch_sa_odds)
+        _ensure_or_load("PD", fetch_pd_odds)
+        # Europe-wide fallback for broader coverage
+        _ensure_or_load("EU", fetch_eu_odds)
+        # Allow a date proximity filter to reduce false matches across far future/past fixtures
+        target_dt: Optional[datetime] = None
+        if match_date:
+            try:
+                target_dt = datetime.fromisoformat(str(match_date).replace("Z", "+00:00"))
+            except Exception:
+                target_dt = None
+        def _date_ok(ev: Dict[str, Any]) -> bool:
+            if not target_dt:
+                return True
+            ts = ev.get("start_time_ms")
+            if not isinstance(ts, int):
+                return True
+            try:
+                ev_dt = datetime.fromtimestamp(ts / 1000)
+                return abs((ev_dt - target_dt).days) <= 3
+            except Exception:
+                return True
+
         for snap in self._bovada_cache.values():
             evs = (snap or {}).get("events") or []
             for ev in evs:
+                if not _date_ok(ev):
+                    continue
                 eh = normalize_team_name(ev.get("home_team") or "") or (
                     ev.get("home_team") or ""
                 )
