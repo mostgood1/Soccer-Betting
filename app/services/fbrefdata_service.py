@@ -213,6 +213,14 @@ class FbrefDataService:
                         res.artifacts.append(str(path))
                 except Exception as e:
                     res.notes.append(f"schedule failed: {e}")
+                    try:
+                        # Fallback: build schedule from baked Football-Data fixtures
+                        built = self._fallback_schedule_from_baked(league, season_str, out_dir)
+                        if built > 0:
+                            res.schedule_rows = built
+                            res.notes.append("schedule fallback: baked football-data")
+                    except Exception as ee:
+                        res.notes.append(f"schedule fallback failed: {ee}")
 
             # Player stats (standard + shooting as a minimum)
             if include_players:
@@ -275,6 +283,81 @@ class FbrefDataService:
                 except Exception:
                     pass
         return res
+
+    def _fallback_schedule_from_baked(self, league: str, season: str, out_dir: Path) -> int:
+        """Write schedule.csv using baked Football-Data JSON embedded in the image.
+
+        This ensures artifacts exist even if fbref scraping is blocked. The columns
+        are a best-effort schedule representation.
+        """
+        import json
+        import pandas as pd  # type: ignore
+
+        code = (league or "PL").upper()
+        # Map season like 2025-2026 to baked file suffix 2025_2026
+        suffix = season.replace("-", "_")
+        name_map = {
+            "PL": f"/app/baked/football_data_PL_{suffix}.json",
+            "BL1": f"/app/baked/football_data_BL1_{suffix}.json",
+            "FL1": f"/app/baked/football_data_FL1_{suffix}.json",
+            "SA": f"/app/baked/football_data_SA_{suffix}.json",
+            "PD": f"/app/baked/football_data_PD_{suffix}.json",
+        }
+        path = name_map.get(code)
+        if not path or not Path(path).exists():
+            # Also try non-code EPL filenames for backward compat
+            alt = f"/app/baked/football_data_epl_{suffix}.json"
+            if code == "PL" and Path(alt).exists():
+                path = alt
+            else:
+                raise FileNotFoundError(f"no baked file for {league} {season}")
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        # Expect either a list of fixtures or an object with key 'fixtures'/'matches'
+        fixtures = []
+        if isinstance(raw, list):
+            fixtures = raw
+        elif isinstance(raw, dict):
+            fixtures = (
+                raw.get("fixtures")
+                or raw.get("matches")
+                or raw.get("records")
+                or []
+            )
+        rows = []
+        for m in fixtures:
+            try:
+                date = m.get("utcDate") or m.get("date") or m.get("commence_time")
+                if not date and m.get("start_time_ms"):
+                    try:
+                        ts = int(m.get("start_time_ms")) / 1000.0
+                        date = datetime.utcfromtimestamp(ts).isoformat() + "Z"
+                    except Exception:
+                        date = None
+                home = (
+                    m.get("homeTeam") or m.get("home_team") or (m.get("home") or {}).get("name")
+                )
+                away = (
+                    m.get("awayTeam") or m.get("away_team") or (m.get("away") or {}).get("name")
+                )
+                if not (home and away and date):
+                    continue
+                rows.append(
+                    {
+                        "date": date,
+                        "home_team": home,
+                        "away_team": away,
+                        "league": code,
+                        "season": season,
+                    }
+                )
+            except Exception:
+                continue
+        if not rows:
+            return 0
+        df = pd.DataFrame(rows)
+        out = out_dir / "schedule.csv"
+        df.to_csv(out, index=False)
+        return int(df.shape[0])
 
     def ingest_local(
         self,
