@@ -38,13 +38,17 @@ def _hdrs(token: Optional[str]) -> Dict[str, str]:
     return h
 
 
-def _get(base: str, path: str, token: Optional[str] = None, **kwargs) -> requests.Response:
+def _get(
+    base: str, path: str, token: Optional[str] = None, **kwargs
+) -> requests.Response:
     url = base.rstrip("/") + path
     timeout = kwargs.pop("timeout", 30)
     return requests.get(url, headers=_hdrs(token), timeout=timeout, **kwargs)
 
 
-def _post(base: str, path: str, token: Optional[str] = None, **kwargs) -> requests.Response:
+def _post(
+    base: str, path: str, token: Optional[str] = None, **kwargs
+) -> requests.Response:
     url = base.rstrip("/") + path
     timeout = kwargs.pop("timeout", 60)
     return requests.post(url, headers=_hdrs(token), timeout=timeout, **kwargs)
@@ -52,13 +56,27 @@ def _post(base: str, path: str, token: Optional[str] = None, **kwargs) -> reques
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--base", default=os.getenv("RENDER_BASE_URL", ""), help="Render base URL, e.g. https://soccer-betting.onrender.com")
-    p.add_argument("--token", default=os.getenv("REFRESH_CRON_TOKEN", ""), help="Bearer token for protected cron/admin endpoints")
-    p.add_argument("--league", default="PL", help="League to spot-check for odds week route")
-    p.add_argument("--week", type=int, default=6, help="Week number to test, defaults to 6")
+    p.add_argument(
+        "--base",
+        default=os.getenv("RENDER_BASE_URL", ""),
+        help="Render base URL, e.g. https://soccer-betting.onrender.com",
+    )
+    p.add_argument(
+        "--token",
+        default=os.getenv("REFRESH_CRON_TOKEN", ""),
+        help="Bearer token for protected cron/admin endpoints",
+    )
+    p.add_argument(
+        "--league", default="PL", help="League to spot-check for odds week route"
+    )
+    p.add_argument(
+        "--week", type=int, default=6, help="Week number to test, defaults to 6"
+    )
     p.add_argument("--home", default="Arsenal", help="Home team for match odds probe")
     p.add_argument("--away", default="Chelsea", help="Away team for match odds probe")
-    p.add_argument("--skip-cron", action="store_true", help="Skip triggering cron endpoints")
+    p.add_argument(
+        "--skip-cron", action="store_true", help="Skip triggering cron endpoints"
+    )
     args = p.parse_args()
 
     base = args.base.strip()
@@ -109,6 +127,7 @@ def main() -> int:
 
     # Optional: rehydrate baked league files (safe/idempotent) if token available
     if token:
+
         def rehydrate():
             r = _post(base, "/api/admin/data/rehydrate", token=token)
             print(r.status_code, r.text[:300])
@@ -119,6 +138,7 @@ def main() -> int:
 
     # Cron: refresh odds + snapshot CSV
     if token and not args.skip_cron:
+
         def refresh_bovada():
             r = _post(base, "/api/cron/refresh-bovada", token=token)
             print(r.status_code, r.text[:300])
@@ -126,7 +146,11 @@ def main() -> int:
             return r.json()
 
         def snapshot_csv():
-            r = _post(base, "/api/cron/snapshot-csv?league=ALL&include_odds_api=true", token=token)
+            r = _post(
+                base,
+                "/api/cron/snapshot-csv?league=ALL&include_odds_api=true",
+                token=token,
+            )
             print(r.status_code, r.text[:300])
             r.raise_for_status()
             return r.json()
@@ -146,7 +170,9 @@ def main() -> int:
 
     # Odds, week
     def odds_week():
-        r = _get(base, f"/api/betting/odds/week/{args.week}?league={args.league}&limit=3")
+        r = _get(
+            base, f"/api/betting/odds/week/{args.week}?league={args.league}&limit=3"
+        )
         print(r.status_code, r.text[:300])
         r.raise_for_status()
         j = r.json()
@@ -168,7 +194,11 @@ def main() -> int:
     # Optional: upcoming (if deployed route exists)
     def odds_upcoming():
         # Use cache-only and include odds to validate EU aggregator coverage
-        r = _get(base, "/api/betting/odds/upcoming?prefetch=false&limit=5&include_odds=true&cache_only=true", timeout=60)
+        r = _get(
+            base,
+            "/api/betting/odds/upcoming?prefetch=false&limit=5&include_odds=true&cache_only=true",
+            timeout=60,
+        )
         print(r.status_code, r.text[:300])
         if r.status_code == 404:
             print("[warn] upcoming route not present on this deployment")

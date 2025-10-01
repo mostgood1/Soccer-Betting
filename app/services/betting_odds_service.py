@@ -53,7 +53,9 @@ class BettingOddsService:
         self._bovada_cache: Dict[str, Dict[str, Any]] = {}
         self._bovada_cache_expiry: Dict[str, datetime] = {}
         # On-disk snapshot location for Bovada
-        self._bovada_snap_dir = Path(os.getenv("BOVADA_SNAPSHOT_DIR", "data/odds_snapshots"))
+        self._bovada_snap_dir = Path(
+            os.getenv("BOVADA_SNAPSHOT_DIR", "data/odds_snapshots")
+        )
         try:
             self._bovada_snap_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
@@ -140,7 +142,9 @@ class BettingOddsService:
         """
         # Fast path for tests/CI: avoid network access entirely
         try:
-            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
+            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv(
+                "PYTEST_CURRENT_TEST"
+            ):
                 return {"provider": "bovada", "events": {}}
         except Exception:
             pass
@@ -256,7 +260,9 @@ class BettingOddsService:
 
         # 1) Try Bovada first (primary across supported leagues)
         try:
-            bov_ev = self._get_bovada_event(n_home, n_away, match_date, no_fetch=cache_only)
+            bov_ev = self._get_bovada_event(
+                n_home, n_away, match_date, no_fetch=cache_only
+            )
         except Exception:
             bov_ev = None
         if bov_ev:
@@ -549,14 +555,20 @@ class BettingOddsService:
 
     # ---------- Helpers ----------
     def _get_bovada_event(
-        self, home: str, away: str, match_date: Optional[str] = None, no_fetch: bool = False
+        self,
+        home: str,
+        away: str,
+        match_date: Optional[str] = None,
+        no_fetch: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Fetch Bovada snapshots (cached) for supported leagues and return a matching event for home/away.
         If match_date is provided (ISO8601), prefer events within +/- 3 days of that date.
         """
         # Fast path for tests/CI: avoid network lookups
         try:
-            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
+            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv(
+                "PYTEST_CURRENT_TEST"
+            ):
                 return None
         except Exception:
             pass
@@ -601,12 +613,18 @@ class BettingOddsService:
                         s = fetcher()
                     except Exception:
                         s = None
-                if not isinstance(s, dict) or "events" not in (s or {}) or not (s.get("events") or []):
+                if (
+                    not isinstance(s, dict)
+                    or "events" not in (s or {})
+                    or not (s.get("events") or [])
+                ):
                     # Fallback to persisted snapshot if available
                     s = _load_persisted(key)
                 if isinstance(s, dict) and "events" in s:
                     self._bovada_cache[key] = s
-                    self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
+                    self._bovada_cache_expiry[key] = now_loc + timedelta(
+                        seconds=self.cache_duration
+                    )
 
         # Always keep EU available
         _ensure_or_load("EU", fetch_eu_odds)
@@ -619,9 +637,12 @@ class BettingOddsService:
         target_dt: Optional[datetime] = None
         if match_date:
             try:
-                target_dt = datetime.fromisoformat(str(match_date).replace("Z", "+00:00"))
+                target_dt = datetime.fromisoformat(
+                    str(match_date).replace("Z", "+00:00")
+                )
             except Exception:
                 target_dt = None
+
         def _date_ok(ev: Dict[str, Any]) -> bool:
             if not target_dt:
                 return True
@@ -635,7 +656,11 @@ class BettingOddsService:
                 return True
 
         # Iterate snaps preferring EU first for best coverage
-        preferred = ["EU", "PL", "BL1", "FL1", "SA", "PD"] if self.prefer_eu else ["PL", "BL1", "FL1", "SA", "PD", "EU"]
+        preferred = (
+            ["EU", "PL", "BL1", "FL1", "SA", "PD"]
+            if self.prefer_eu
+            else ["PL", "BL1", "FL1", "SA", "PD", "EU"]
+        )
         seen = set()
         ordered_keys = []
         for k in preferred:
@@ -664,17 +689,27 @@ class BettingOddsService:
                     a = ea.lower()
                     if h == home.lower() and a == away.lower():
                         return ev
+
                     # Relaxed alias/contains match for provider quirks (e.g., 'FC Internazionale Milano' vs 'Inter')
                     def _aliases(s: str) -> set:
                         base = s.lower()
                         parts = set([base])
                         # Remove common tokens and numbers
-                        for tok in [" fc", " afc", " calcio", " ss ", " us ", " acf ", " ac "]:
+                        for tok in [
+                            " fc",
+                            " afc",
+                            " calcio",
+                            " ss ",
+                            " us ",
+                            " acf ",
+                            " ac ",
+                        ]:
                             base = base.replace(tok.strip(), "")
                         parts.add(base)
                         parts.add(base.replace("  ", " ").strip())
                         parts |= set(base.replace("  ", " ").strip().split())
                         return {p for p in parts if p}
+
                     H = _aliases(h)
                     A = _aliases(a)
                     th = home.lower()

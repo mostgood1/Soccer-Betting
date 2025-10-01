@@ -19,12 +19,18 @@ import math
 import random
 
 from .betting_odds_service import BettingOddsService
-from .game_week_service import game_week_service, reconciliation_service as model_reconciliation_service
+from .game_week_service import (
+    game_week_service,
+    reconciliation_service as model_reconciliation_service,
+)
 from .enhanced_epl_service_v2 import EnhancedEPLService
 from .reconciliation_store import reconciliation_store
 from .baseline_prediction_store import baseline_prediction_store
 from ..ml.advanced_predictor import advanced_ml_predictor
-from .league_manager import list_supported as list_supported_leagues, get_service as get_league_service
+from .league_manager import (
+    list_supported as list_supported_leagues,
+    get_service as get_league_service,
+)
 from .team_name_normalizer import normalize_team_name
 
 _SNAPSHOT_DIR = Path("data/week_snapshots")
@@ -175,8 +181,16 @@ class WeekSnapshotService:
                     idx_by_pair = {}
                     for m in matches:
                         mid = m.get("id") or m.get("match_id")
-                        ht = _norm(m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name"))
-                        at = _norm(m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name"))
+                        ht = _norm(
+                            m.get("home_team")
+                            or m.get("homeTeam")
+                            or (m.get("home") or {}).get("name")
+                        )
+                        at = _norm(
+                            m.get("away_team")
+                            or m.get("awayTeam")
+                            or (m.get("away") or {}).get("name")
+                        )
                         if mid is not None:
                             idx_by_id[mid] = m
                         if ht and at:
@@ -373,7 +387,9 @@ class WeekSnapshotService:
         """Walk all supported leagues and reconcile completed matches up to a week.
         Uses current model predictions; writes into reconciliation_store.
         """
-        leagues = list_supported_leagues()  # returns [{"code": "PL", "name": "..."}, ...]
+        leagues = (
+            list_supported_leagues()
+        )  # returns [{"code": "PL", "name": "..."}, ...]
         totals = {"matches": 0, "reconciled": 0, "by_league": {}}
         # Ensure models are loaded
         try:
@@ -389,16 +405,25 @@ class WeekSnapshotService:
             except Exception:
                 continue
             matches = (
-                svc.get_all_matches() if hasattr(svc, "get_all_matches") else self.epl_service.get_all_matches()
+                svc.get_all_matches()
+                if hasattr(svc, "get_all_matches")
+                else self.epl_service.get_all_matches()
             )
             weeks = game_week_service.organize_matches_by_week(matches)
             rec_count = 0
             considered = 0
             for w in range(1, int(up_to_week) + 1):
                 for m in weeks.get(w, []):
-                    hs = m.get("home_score") if "home_score" in m else m.get("homeScore")
-                    as_ = m.get("away_score") if "away_score" in m else m.get("awayScore")
-                    status_completed = m.get("status") in ["FINISHED", "COMPLETED"] or m.get("is_completed")
+                    hs = (
+                        m.get("home_score") if "home_score" in m else m.get("homeScore")
+                    )
+                    as_ = (
+                        m.get("away_score") if "away_score" in m else m.get("awayScore")
+                    )
+                    status_completed = m.get("status") in [
+                        "FINISHED",
+                        "COMPLETED",
+                    ] or m.get("is_completed")
                     if hs is None or as_ is None or not status_completed:
                         continue
                     home = normalize_team_name(m.get("home_team") or m.get("homeTeam"))
@@ -406,29 +431,40 @@ class WeekSnapshotService:
                     if not (home and away):
                         continue
                     try:
-                        raw = advanced_ml_predictor.predict_match(home, away, league=code)
+                        raw = advanced_ml_predictor.predict_match(
+                            home, away, league=code
+                        )
                         if not raw:
                             continue
                         pred = {
                             "home_goals": float(raw.get("home_goals", 1.2)),
                             "away_goals": float(raw.get("away_goals", 1.1)),
                             "total_goals": float(raw.get("total_goals", 2.5)),
-                            "home_win_prob": float(raw.get("home_win_probability", 0.34)),
+                            "home_win_prob": float(
+                                raw.get("home_win_probability", 0.34)
+                            ),
                             "draw_prob": float(raw.get("draw_probability", 0.32)),
-                            "away_win_prob": float(raw.get("away_win_probability", 0.34)),
+                            "away_win_prob": float(
+                                raw.get("away_win_probability", 0.34)
+                            ),
                         }
                         rec_match = dict(m)
                         rec_match["home_score"] = hs
                         rec_match["away_score"] = as_
                         rec_match["game_week"] = w
                         rec_match["league"] = getattr(svc, "code", code)
-                        rec = model_reconciliation_service.reconcile_match_predictions(rec_match, pred)
+                        rec = model_reconciliation_service.reconcile_match_predictions(
+                            rec_match, pred
+                        )
                         reconciliation_store.upsert(rec_match, rec)
                         rec_count += 1
                         considered += 1
                     except Exception:
                         continue
-            totals["by_league"][code] = {"reconciled": rec_count, "considered": considered}
+            totals["by_league"][code] = {
+                "reconciled": rec_count,
+                "considered": considered,
+            }
             totals["reconciled"] += rec_count
             totals["matches"] += considered
         reconciliation_store.compute_aggregates()
@@ -442,7 +478,9 @@ class WeekSnapshotService:
         for lg in list_supported_leagues():
             code = (lg.get("code") if isinstance(lg, dict) else str(lg)).upper()
             try:
-                res = calibration_service.calibrate_up_to_week(int(up_to_week), league=code)
+                res = calibration_service.calibrate_up_to_week(
+                    int(up_to_week), league=code
+                )
                 out["by_league"][code] = res
             except Exception as e:
                 out["by_league"][code] = {"trained": False, "error": str(e)}

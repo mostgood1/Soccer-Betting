@@ -14,7 +14,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.services.league_manager import list_supported as list_supported_leagues, get_service as get_league_service
+from app.services.league_manager import (
+    list_supported as list_supported_leagues,
+    get_service as get_league_service,
+)
 from app.services.game_week_service import game_week_service
 from app.services.team_name_normalizer import normalize_team_name
 from app.ml.advanced_predictor import advanced_ml_predictor
@@ -99,13 +102,20 @@ def main():
     for lg in leagues:
         code = (lg.get("code") if isinstance(lg, dict) else str(lg)).upper()
         svc = get_league_service(code)
-        matches = svc.get_all_matches() if hasattr(svc, "get_all_matches") else svc.get_matches()
+        matches = (
+            svc.get_all_matches()
+            if hasattr(svc, "get_all_matches")
+            else svc.get_matches()
+        )
         weeks = game_week_service.organize_matches_by_week(matches)
         for wk in range(1, up_to_week + 1):
             for m in weeks.get(wk, []):
                 hs = m.get("home_score") if "home_score" in m else m.get("homeScore")
                 as_ = m.get("away_score") if "away_score" in m else m.get("awayScore")
-                status_completed = m.get("status") in ["FINISHED", "COMPLETED"] or m.get("is_completed")
+                status_completed = m.get("status") in [
+                    "FINISHED",
+                    "COMPLETED",
+                ] or m.get("is_completed")
                 if hs is None or as_ is None or not status_completed:
                     continue
                 home_raw = m.get("home_team") or m.get("homeTeam")
@@ -114,9 +124,9 @@ def main():
                 away = normalize_team_name(away_raw) or away_raw
                 # Pull market
                 date = (m.get("utc_date") or m.get("date") or "").split("T")[0]
-                rec = market_idx.get(f"{date}|{home.lower()}|{away.lower()}") or market_idx.get(
-                    f"{home}|{away}".lower()
-                )
+                rec = market_idx.get(
+                    f"{date}|{home.lower()}|{away.lower()}"
+                ) or market_idx.get(f"{home}|{away}".lower())
                 mp = _market_probs(rec) if rec else None
                 if not mp:
                     continue
@@ -133,13 +143,15 @@ def main():
                 ph, pd, pa = (ph / s, pd / s, pa / s)
                 # Actual class
                 cls = 0 if hs > as_ else 2 if as_ > hs else 1
-                rows.append({
-                    "league": code,
-                    "week": wk,
-                    "model": (ph, pd, pa),
-                    "market": mp,
-                    "cls": cls,
-                })
+                rows.append(
+                    {
+                        "league": code,
+                        "week": wk,
+                        "model": (ph, pd, pa),
+                        "market": mp,
+                        "cls": cls,
+                    }
+                )
                 matched += 1
 
     if not rows:
@@ -149,24 +161,12 @@ def main():
     def agg(vals: List[float]) -> Optional[float]:
         return round(mean(vals), 4) if vals else None
 
-    model_nll = [
-        _nll(r["model"], r["cls"]) for r in rows
-    ]
-    market_nll = [
-        _nll(r["market"], r["cls"]) for r in rows
-    ]
-    model_brier = [
-        _brier(r["model"], r["cls"]) for r in rows
-    ]
-    market_brier = [
-        _brier(r["market"], r["cls"]) for r in rows
-    ]
-    model_acc = [
-        _top1_acc(r["model"], r["cls"]) for r in rows
-    ]
-    market_acc = [
-        _top1_acc(r["market"], r["cls"]) for r in rows
-    ]
+    model_nll = [_nll(r["model"], r["cls"]) for r in rows]
+    market_nll = [_nll(r["market"], r["cls"]) for r in rows]
+    model_brier = [_brier(r["model"], r["cls"]) for r in rows]
+    market_brier = [_brier(r["market"], r["cls"]) for r in rows]
+    model_acc = [_top1_acc(r["model"], r["cls"]) for r in rows]
+    market_acc = [_top1_acc(r["market"], r["cls"]) for r in rows]
 
     # Simple correlation between model and market Home-win probability
     try:
@@ -178,7 +178,9 @@ def main():
         mean_m = mean(mh)
         mean_k = mean(kh)
         num = sum((a - mean_m) * (b - mean_k) for a, b in zip(mh, kh))
-        den = math.sqrt(sum((a - mean_m) ** 2 for a in mh) * sum((b - mean_k) ** 2 for b in kh))
+        den = math.sqrt(
+            sum((a - mean_m) ** 2 for a in mh) * sum((b - mean_k) ** 2 for b in kh)
+        )
         corr_home = num / den if den > 0 else None
     except Exception:
         corr_home = None
@@ -197,14 +199,22 @@ def main():
             "top1_accuracy": agg(market_acc),
         },
         "delta": {
-            "avg_nll": round((mean(market_nll) - mean(model_nll)), 4) if model_nll and market_nll else None,
-            "avg_brier": round((mean(market_brier) - mean(model_brier)), 4) if model_brier and market_brier else None,
-            "top1_accuracy": round((mean(model_acc) - mean(market_acc)), 4) if model_acc and market_acc else None,
+            "avg_nll": round((mean(market_nll) - mean(model_nll)), 4)
+            if model_nll and market_nll
+            else None,
+            "avg_brier": round((mean(market_brier) - mean(model_brier)), 4)
+            if model_brier and market_brier
+            else None,
+            "top1_accuracy": round((mean(model_acc) - mean(market_acc)), 4)
+            if model_acc and market_acc
+            else None,
         },
         "correlation": {
-            "pearson_model_vs_market_home_prob": None if corr_home is None else round(corr_home, 4)
+            "pearson_model_vs_market_home_prob": None
+            if corr_home is None
+            else round(corr_home, 4)
         },
-        "notes": "NLL/Brier lower is better; delta>0 means model better on that metric."
+        "notes": "NLL/Brier lower is better; delta>0 means model better on that metric.",
     }
     print(json.dumps(out, indent=2))
 

@@ -42,7 +42,9 @@ def _save_blend_config(path: str, data: Dict[str, Any]) -> None:
     Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def _blend(p: Tuple[float, float, float], m: Tuple[float, float, float], w: float) -> Tuple[float, float, float]:
+def _blend(
+    p: Tuple[float, float, float], m: Tuple[float, float, float], w: float
+) -> Tuple[float, float, float]:
     w = max(0.0, min(1.0, float(w)))
     d = (1 - w) * p[0] + w * m[0]
     h = (1 - w) * p[1] + w * m[1]
@@ -56,17 +58,27 @@ def _nll(p: float) -> float:
     return -math.log(p)
 
 
-def _evaluate_result_for_league(league: str, historic_idx: Dict[str, Dict[str, Any]]) -> Tuple[Dict[str, float], List[float]]:
+def _evaluate_result_for_league(
+    league: str, historic_idx: Dict[str, Dict[str, Any]]
+) -> Tuple[Dict[str, float], List[float]]:
     """Return mapping weight->avg NLL and the candidate grid used."""
     grid = [round(x, 2) for x in [i / 20.0 for i in range(0, 11)]]  # 0.0..0.5
     # Pull reconciled matches with model probs and actual result
     rec = reconciliation_store.load()
-    rows = [r for r in rec.get("matches", []) if str(r.get("league")).upper() == str(league).upper()]
+    rows = [
+        r
+        for r in rec.get("matches", [])
+        if str(r.get("league")).upper() == str(league).upper()
+    ]
     # Build evaluation set
     eval_rows = []
     for r in rows:
-        home = normalize_team_name(r.get("home_team") or r.get("home")) or r.get("home_team")
-        away = normalize_team_name(r.get("away_team") or r.get("away")) or r.get("away_team")
+        home = normalize_team_name(r.get("home_team") or r.get("home")) or r.get(
+            "home_team"
+        )
+        away = normalize_team_name(r.get("away_team") or r.get("away")) or r.get(
+            "away_team"
+        )
         if not (home and away):
             continue
         # Model probs expected in reconciliation record; fallback skip if missing
@@ -77,13 +89,17 @@ def _evaluate_result_for_league(league: str, historic_idx: Dict[str, Dict[str, A
         if not all(isinstance(v, (int, float)) for v in (H, D, A)):
             continue
         # Apply calibration for safety
-        pm_cal = calibration_service.apply_if_ready({"H": H, "D": D, "A": A}, league=league)
+        pm_cal = calibration_service.apply_if_ready(
+            {"H": H, "D": D, "A": A}, league=league
+        )
         p = (pm_cal["D"], pm_cal["H"], pm_cal["A"])
         # Market probs from historic index
         hk = f"{home.lower()}|{away.lower()}"
         mk = historic_idx.get(hk) or {}
         cons = mk.get("preferred_implied") or mk.get("consensus_implied") or {}
-        Mh = cons.get("H"); Md = cons.get("D"); Ma = cons.get("A")
+        Mh = cons.get("H")
+        Md = cons.get("D")
+        Ma = cons.get("A")
         if not all(isinstance(v, (int, float)) for v in (Mh, Md, Ma)):
             continue
         s = Mh + Md + Ma
@@ -123,7 +139,9 @@ def main() -> None:
         scores, grid = _evaluate_result_for_league(lg, historic_idx)
         if not scores:
             continue
-        best_w, best_v = min(((float(k), v) for k, v in scores.items()), key=lambda kv: kv[1])
+        best_w, best_v = min(
+            ((float(k), v) for k, v in scores.items()), key=lambda kv: kv[1]
+        )
         result_map[lg] = round(best_w, 2)
     if result_map:
         cfg["result_market_weight_by_league"] = result_map

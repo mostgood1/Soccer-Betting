@@ -161,11 +161,24 @@ SUFFIXES = (" afc", " fc", " a.f.c.", " f.c.")
 # Common club prefixes/suffixes and artifacts across leagues to ignore for matching
 _STOP_TOKENS = {
     # generic
-    "fc", "afc", "cf", "cfc", "sc", "sd", "cd",
+    "fc",
+    "afc",
+    "cf",
+    "cfc",
+    "sc",
+    "sd",
+    "cd",
     # italy-specific
-    "calcio", "ss", "us", "acf", "asd",
+    "calcio",
+    "ss",
+    "us",
+    "acf",
+    "asd",
     # spain/france variants
-    "sa", "sad", "ud", "ac",
+    "sa",
+    "sad",
+    "ud",
+    "ac",
 }
 
 

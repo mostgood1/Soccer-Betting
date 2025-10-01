@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 # Make app load fast in tests
 os.environ.setdefault("ML_SKIP_STARTUP_TRAIN", "1")
 os.environ.setdefault("ALLOW_ON_DEMAND_PREDICTIONS", "0")
+os.environ.setdefault("DISABLE_PROVIDER_CALLS", "1")
 
 from app.main import app  # noqa: E402
 from app.services.betting_odds_service import BettingOddsService  # noqa: E402

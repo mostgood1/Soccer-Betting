@@ -57,25 +57,35 @@ def main():
                 elif isinstance(wod, list):
                     row["weekOdds"] = len(wod)
                 else:
-                    row["weekOdds"] = len(wod.get("matches", [])) if isinstance(wod, dict) else 0
+                    row["weekOdds"] = (
+                        len(wod.get("matches", [])) if isinstance(wod, dict) else 0
+                    )
 
                 oc = get(f"/api/game-weeks/{cw}/odds-compare", params={"league": lg})
-                row["oddsCompare"] = len(oc.get("matches", [])) if isinstance(oc, dict) else 0
+                row["oddsCompare"] = (
+                    len(oc.get("matches", [])) if isinstance(oc, dict) else 0
+                )
 
                 tc = get(
                     f"/api/game-weeks/{cw}/totals-compare",
                     params={"league": lg, "line": 2.5},
                 )
-                row["totalsCompare"] = len(tc.get("matches", [])) if isinstance(tc, dict) else 0
+                row["totalsCompare"] = (
+                    len(tc.get("matches", [])) if isinstance(tc, dict) else 0
+                )
 
                 cc = get(
                     f"/api/game-weeks/{cw}/corners-compare",
                     params={"league": lg, "line": 9.5},
                 )
-                row["cornersCompare"] = len(cc.get("matches", [])) if isinstance(cc, dict) else 0
+                row["cornersCompare"] = (
+                    len(cc.get("matches", [])) if isinstance(cc, dict) else 0
+                )
 
             brand = get("/api/branding/teams", params={"league": lg})
-            row["brandingCount"] = (len(brand) if isinstance(brand, list) else brand.get("count", 0))
+            row["brandingCount"] = (
+                len(brand) if isinstance(brand, list) else brand.get("count", 0)
+            )
         except Exception as e:
             row["error"] = str(e)
         out.append(row)

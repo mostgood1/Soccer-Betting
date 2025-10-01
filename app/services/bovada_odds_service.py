@@ -257,7 +257,11 @@ def _fetch_bovada_coupon(
                                 probs["D"] = imp
                                 h2h_decimals["D"] = dec
                                 try:
-                                    h2h_american["D"] = int(american) if isinstance(american, (int, float)) else None
+                                    h2h_american["D"] = (
+                                        int(american)
+                                        if isinstance(american, (int, float))
+                                        else None
+                                    )
                                 except Exception:
                                     h2h_american["D"] = None
                             elif home_name and _normalize_team(
@@ -266,7 +270,11 @@ def _fetch_bovada_coupon(
                                 probs["H"] = imp
                                 h2h_decimals["H"] = dec
                                 try:
-                                    h2h_american["H"] = int(american) if isinstance(american, (int, float)) else None
+                                    h2h_american["H"] = (
+                                        int(american)
+                                        if isinstance(american, (int, float))
+                                        else None
+                                    )
                                 except Exception:
                                     h2h_american["H"] = None
                             elif away_name and _normalize_team(
@@ -275,21 +283,33 @@ def _fetch_bovada_coupon(
                                 probs["A"] = imp
                                 h2h_decimals["A"] = dec
                                 try:
-                                    h2h_american["A"] = int(american) if isinstance(american, (int, float)) else None
+                                    h2h_american["A"] = (
+                                        int(american)
+                                        if isinstance(american, (int, float))
+                                        else None
+                                    )
                                 except Exception:
                                     h2h_american["A"] = None
                             elif "home" in oname:
                                 probs["H"] = imp
                                 h2h_decimals["H"] = dec
                                 try:
-                                    h2h_american["H"] = int(american) if isinstance(american, (int, float)) else None
+                                    h2h_american["H"] = (
+                                        int(american)
+                                        if isinstance(american, (int, float))
+                                        else None
+                                    )
                                 except Exception:
                                     h2h_american["H"] = None
                             elif "away" in oname:
                                 probs["A"] = imp
                                 h2h_decimals["A"] = dec
                                 try:
-                                    h2h_american["A"] = int(american) if isinstance(american, (int, float)) else None
+                                    h2h_american["A"] = (
+                                        int(american)
+                                        if isinstance(american, (int, float))
+                                        else None
+                                    )
                                 except Exception:
                                     h2h_american["A"] = None
                         h2h_probs = _normalize_probs(probs)

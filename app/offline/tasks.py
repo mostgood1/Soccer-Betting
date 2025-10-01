@@ -598,6 +598,7 @@ def rebuild_predictions() -> Dict[str, Any]:
     failed = 0
     # Default to EPL for this legacy sweep
     from ..services.league_manager import normalize_league_code as _norm
+
     code = _norm("PL")
     for m in matches:
         home_raw = m.get("home_team") or m.get("homeTeam")
@@ -692,6 +693,7 @@ def reconcile_week(
     weeks = game_week_service.organize_matches_by_week(matches)
     # This variant operates on EPL data; use PL for league-aware predictor features
     from ..services.league_manager import normalize_league_code as _norm
+
     code = _norm("PL")
     wk_matches = weeks.get(week, [])
     # Build local map for quick match id lookup for manual injection
@@ -1170,7 +1172,19 @@ def compare_week_odds(
     historic_idx = _load_historic_odds_index()
     # Augment with recent CSV historics when present (last 60 days)
     try:
-        csv_idx = load_h2h_index_from_csv(code or "PL", days=60, preferred_bookmakers=[s.strip() for s in (os.getenv("PREFERRED_BOOKMAKERS", "bet365,draftkings,fanduel,bovada")).split(",") if s.strip()])
+        csv_idx = load_h2h_index_from_csv(
+            code or "PL",
+            days=60,
+            preferred_bookmakers=[
+                s.strip()
+                for s in (
+                    os.getenv(
+                        "PREFERRED_BOOKMAKERS", "bet365,draftkings,fanduel,bovada"
+                    )
+                ).split(",")
+                if s.strip()
+            ],
+        )
         # Merge: prefer historic (older, curated) first; fill missing keys with CSV
         for k, v in (csv_idx or {}).items():
             if k not in historic_idx:
@@ -1186,8 +1200,10 @@ def compare_week_odds(
         if use_live is not None:
             allow_live = bool(use_live)
         else:
-            allow_live = (
-                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            allow_live = str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in (
+                "1",
+                "true",
+                "True",
             )
     except Exception:
         allow_live = False
@@ -1437,9 +1453,13 @@ def compare_week_odds(
             # Capture preferred bookmaker decimals for EV when present from CSV historics
             try:
                 pd_map = market_rec.get("preferred_decimals")
-                if isinstance(pd_map, dict) and all(k in pd_map for k in ("H", "D", "A")):
+                if isinstance(pd_map, dict) and all(
+                    k in pd_map for k in ("H", "D", "A")
+                ):
                     preferred_decimals = {
-                        k: float(pd_map.get(k)) if isinstance(pd_map.get(k), (int, float)) else None
+                        k: float(pd_map.get(k))
+                        if isinstance(pd_map.get(k), (int, float))
+                        else None
                         for k in ("H", "D", "A")
                     }
                     ev_bookmaker = market_rec.get("preferred_bookmaker")
@@ -1537,7 +1557,11 @@ def compare_week_odds(
                 for o in ("H", "D", "A"):
                     p = model_probs.get(o)
                     dec = preferred_decimals.get(o) if preferred_decimals else None
-                    if isinstance(p, (int, float)) and isinstance(dec, (int, float)) and dec > 1.0:
+                    if (
+                        isinstance(p, (int, float))
+                        and isinstance(dec, (int, float))
+                        and dec > 1.0
+                    ):
                         ev_map[o] = round(p * dec - 1.0, 4)
                 if ev_map:
                     ev_outcomes = ev_map
@@ -1627,8 +1651,8 @@ def compare_week_odds(
         "market_brier": (sum(market_brier) / len(market_brier))
         if market_brier
         else None,
-    "edge_threshold": edge_threshold,
-    "prob_threshold": prob_threshold,
+        "edge_threshold": edge_threshold,
+        "prob_threshold": prob_threshold,
         "recommended_edges": recommended_edges,
         "edge_rate": (recommended_edges / len(rows)) if rows else None,
         "pick_alignment_rate": (pick_alignments / len(rows)) if rows else None,
@@ -1687,8 +1711,10 @@ def compare_week_totals(
         if use_live is not None:
             allow_live = bool(use_live)
         else:
-            allow_live = (
-                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            allow_live = str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in (
+                "1",
+                "true",
+                "True",
             )
     except Exception:
         allow_live = False
@@ -1705,7 +1731,11 @@ def compare_week_totals(
                     key = f"{h}|{a}".lower()
                     for t in ev.get("totals") or []:
                         try:
-                            l = float(t.get("line")) if t.get("line") is not None else None
+                            l = (
+                                float(t.get("line"))
+                                if t.get("line") is not None
+                                else None
+                            )
                         except Exception:
                             l = None
                         if l is None:
@@ -2090,8 +2120,10 @@ def compare_week_first_half_totals(
         if use_live is not None:
             allow_live = bool(use_live)
         else:
-            allow_live = (
-                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            allow_live = str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in (
+                "1",
+                "true",
+                "True",
             )
     except Exception:
         allow_live = False
@@ -2109,7 +2141,11 @@ def compare_week_first_half_totals(
                     key = f"{h}|{a}".lower()
                     for t in ev.get("first_half_totals") or []:
                         try:
-                            l = float(t.get("line")) if t.get("line") is not None else None
+                            l = (
+                                float(t.get("line"))
+                                if t.get("line") is not None
+                                else None
+                            )
                         except Exception:
                             l = None
                         if l is None:
@@ -2439,8 +2475,10 @@ def compare_week_second_half_totals(
         if use_live is not None:
             allow_live = bool(use_live)
         else:
-            allow_live = (
-                str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in ("1", "true", "True")
+            allow_live = str(os.getenv("ODDS_COMPARE_USE_LIVE", "0")).strip() in (
+                "1",
+                "true",
+                "True",
             )
     except Exception:
         allow_live = False
@@ -2456,7 +2494,11 @@ def compare_week_second_half_totals(
                     key = f"{h}|{a}".lower()
                     for t in ev.get("second_half_totals") or []:
                         try:
-                            l = float(t.get("line")) if t.get("line") is not None else None
+                            l = (
+                                float(t.get("line"))
+                                if t.get("line") is not None
+                                else None
+                            )
                         except Exception:
                             l = None
                         if l is None:
@@ -3975,6 +4017,7 @@ def _compute_consensus_and_edges(
     events = odds_payload.get("events") or []
     # If caller provided league in payload, normalize it for predictor blending
     from ..services.league_manager import normalize_league_code as _norm
+
     code = _norm(odds_payload.get("league"))
     consensus_list: List[Dict[str, Any]] = []
     edges_list: List[Dict[str, Any]] = []
@@ -5035,6 +5078,7 @@ def main():
         weeks = game_week_service.organize_matches_by_week(matches)
         # default to EPL for this calibration tool
         from ..services.league_manager import normalize_league_code as _norm
+
         code = _norm("PL")
         zs: List[float] = []
         ys: List[int] = []
@@ -5073,7 +5117,9 @@ def main():
                 pred = _prediction_cache.get(key_pred)
                 if not pred:
                     try:
-                        raw = advanced_ml_predictor.predict_match(home, away, league=code)
+                        raw = advanced_ml_predictor.predict_match(
+                            home, away, league=code
+                        )
                         if raw:
                             pred = _normalize_prediction(raw, home, away)
                             _prediction_cache[key_pred] = pred

@@ -66,7 +66,9 @@ def _ts() -> str:
     return datetime.utcnow().isoformat() + "Z"
 
 
-def append_h2h_from_bovada(league: str, events: Iterable[Dict[str, Any]], week: Optional[int] = None) -> int:
+def append_h2h_from_bovada(
+    league: str, events: Iterable[Dict[str, Any]], week: Optional[int] = None
+) -> int:
     """Append H2H odds rows from Bovada parsed events.
 
     Expects each event to contain:
@@ -223,7 +225,11 @@ def append_h2h_from_oddsapi(
                     for o in mk.get("outcomes") or []:
                         name = (o.get("name") or "").upper()
                         try:
-                            price = float(o.get("price")) if o.get("price") is not None else None
+                            price = (
+                                float(o.get("price"))
+                                if o.get("price") is not None
+                                else None
+                            )
                         except Exception:
                             price = None
                         if price and price > 1.0:
@@ -252,7 +258,9 @@ def append_h2h_from_oddsapi(
                                 "",
                                 dec if isinstance(dec, (int, float)) else "",
                                 "",
-                                round(prob, 6) if isinstance(prob, (int, float)) else "",
+                                round(prob, 6)
+                                if isinstance(prob, (int, float))
+                                else "",
                                 over if isinstance(over, (int, float)) else "",
                             ]
                         )
@@ -288,7 +296,11 @@ def load_h2h_index_from_csv(
             for rec in r:
                 try:
                     ts = rec.get("timestamp") or ""
-                    ts_dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) if ts else None
+                    ts_dt = (
+                        datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        if ts
+                        else None
+                    )
                 except Exception:
                     ts_dt = None
                 if ts_dt and ts_dt < since:
@@ -320,7 +332,9 @@ def load_h2h_index_from_csv(
         except Exception:
             prob = None
         try:
-            over = float(rec.get("book_overround")) if rec.get("book_overround") else None
+            over = (
+                float(rec.get("book_overround")) if rec.get("book_overround") else None
+            )
         except Exception:
             over = None
         if outcome in ("H", "D", "A") and isinstance(prob, float):
@@ -332,7 +346,9 @@ def load_h2h_index_from_csv(
         if pref and not g.get("preferred") and bk in pref:
             # stash decimals for EV
             try:
-                dec = float(rec.get("decimal_odds")) if rec.get("decimal_odds") else None
+                dec = (
+                    float(rec.get("decimal_odds")) if rec.get("decimal_odds") else None
+                )
             except Exception:
                 dec = None
             if dec and outcome in ("H", "D", "A"):

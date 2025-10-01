@@ -567,8 +567,16 @@ def _overlay_manual_results_for_weeks(weeks_data: Dict[int, List[Dict[str, Any]]
             idx_by_pair = {}
             for m in items:
                 mid = m.get("id") or m.get("match_id")
-                ht = normalize_team_name(m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name"))
-                at = normalize_team_name(m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name"))
+                ht = normalize_team_name(
+                    m.get("home_team")
+                    or m.get("homeTeam")
+                    or (m.get("home") or {}).get("name")
+                )
+                at = normalize_team_name(
+                    m.get("away_team")
+                    or m.get("awayTeam")
+                    or (m.get("away") or {}).get("name")
+                )
                 if mid is not None:
                     idx_by_id[mid] = m
                 if ht and at:
@@ -646,7 +654,7 @@ async def _debug_startup_event():
 
         baked_base = _P("/app/baked")
         data_base = _P("data")
-                # First-boot hydration: if the persistent data volume is empty, copy baked league
+        # First-boot hydration: if the persistent data volume is empty, copy baked league
         # Map of league codes to data filenames
         league_files = {
             "PL": "football_data_PL_2025_2026.json",
@@ -704,7 +712,9 @@ async def _debug_startup_event():
     async def _bootstrap_after_startup():
         # In tests/CI, skip heavy bootstrap to avoid long waits and network calls
         try:
-            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv("PYTEST_CURRENT_TEST"):
+            if os.getenv("DISABLE_PROVIDER_CALLS", "0") == "1" or os.getenv(
+                "PYTEST_CURRENT_TEST"
+            ):
                 return
         except Exception:
             pass
@@ -714,12 +724,16 @@ async def _debug_startup_event():
                 res = betting_odds_service.prefetch_bovada()
                 # Record cron-like status for UI footer/ops
                 try:
-                    _write_cron_status("refresh-bovada", {"result": res, "source": "startup"})
+                    _write_cron_status(
+                        "refresh-bovada", {"result": res, "source": "startup"}
+                    )
                 except Exception:
                     pass
             except Exception as e:
                 try:
-                    _write_cron_status("refresh-bovada", {"error": str(e), "source": "startup"})
+                    _write_cron_status(
+                        "refresh-bovada", {"error": str(e), "source": "startup"}
+                    )
                 except Exception:
                     pass
             # 2) Ensure prediction cache exists when on-demand compute is disabled
@@ -731,7 +745,9 @@ async def _debug_startup_event():
                         needs_rebuild = True
                     else:
                         try:
-                            if (not _PREDICTION_CACHE_PATH.exists()) or _PREDICTION_CACHE_PATH.stat().st_size == 0:
+                            if (
+                                not _PREDICTION_CACHE_PATH.exists()
+                            ) or _PREDICTION_CACHE_PATH.stat().st_size == 0:
                                 needs_rebuild = True
                         except Exception:
                             needs_rebuild = True
@@ -741,18 +757,30 @@ async def _debug_startup_event():
 
                     stats = await asyncio.to_thread(_regenerate_predictions)
                     try:
-                        _write_cron_status("rebuild-predictions", {"result": stats, "source": "startup"})
+                        _write_cron_status(
+                            "rebuild-predictions",
+                            {"result": stats, "source": "startup"},
+                        )
                     except Exception:
                         pass
                 else:
                     # Still log a no-op so ops dashboard shows intent
                     try:
-                        _write_cron_status("rebuild-predictions", {"skipped": True, "reason": "cache-present or on-demand-enabled", "source": "startup"})
+                        _write_cron_status(
+                            "rebuild-predictions",
+                            {
+                                "skipped": True,
+                                "reason": "cache-present or on-demand-enabled",
+                                "source": "startup",
+                            },
+                        )
                     except Exception:
                         pass
             except Exception as e:
                 try:
-                    _write_cron_status("rebuild-predictions", {"error": str(e), "source": "startup"})
+                    _write_cron_status(
+                        "rebuild-predictions", {"error": str(e), "source": "startup"}
+                    )
                 except Exception:
                     pass
         except Exception:
@@ -1210,6 +1238,7 @@ async def get_week_betting_odds(
         week_matches = weeks.get(week, [])
         # Determine threshold: explicit from_date > next UTC day > no filter
         from datetime import datetime, timezone, timedelta
+
         threshold_dt: Optional[datetime] = None
         if from_date:
             try:
@@ -1221,7 +1250,9 @@ async def get_week_betting_odds(
         elif future_only:
             now_utc = datetime.now(timezone.utc)
             next_day = (now_utc + timedelta(days=1)).date()
-            threshold_dt = datetime(next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc)
+            threshold_dt = datetime(
+                next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc
+            )
 
         def _parse_dt(m):
             d = m.get("utc_date") or m.get("date")
@@ -1247,7 +1278,9 @@ async def get_week_betting_odds(
                 dtm = dtm.replace(tzinfo=timezone.utc)
             return dtm >= threshold_dt
 
-        week_matches_sorted = sorted(week_matches, key=lambda x: (_parse_dt(x) or datetime.max))
+        week_matches_sorted = sorted(
+            week_matches, key=lambda x: (_parse_dt(x) or datetime.max)
+        )
         filtered = [m for m in week_matches_sorted if _ok_future(m)]
         out = []
         for m in filtered[:limit]:
@@ -1266,7 +1299,12 @@ async def get_week_betting_odds(
                 continue
             odds = betting_odds_service.get_match_odds(home, away, dt)
             out.append({"home_team": home, "away_team": away, "date": dt, "odds": odds})
-        payload = {"week": week, "count": len(out), "matches": out, "league": (league or "PL")}
+        payload = {
+            "week": week,
+            "count": len(out),
+            "matches": out,
+            "league": (league or "PL"),
+        }
         _WEEK_ODDS_CACHE[_key] = {"payload": payload, "ts": _now}
         return payload
     except Exception as e:
@@ -1341,7 +1379,9 @@ async def get_upcoming_odds(
         # Define a next-day threshold for display rows (to avoid past matches when the week spans multiple dates)
         now_dt = datetime.now(timezone.utc)
         next_day = (now_dt + timedelta(days=1)).date()
-        threshold_dt = datetime(next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc)
+        threshold_dt = datetime(
+            next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc
+        )
 
         for lg in wanted:
             try:
@@ -1361,8 +1401,10 @@ async def get_upcoming_odds(
                         dtm = _parse_dt(m)
                         if dtm and dtm.tzinfo is None:
                             dtm = dtm.replace(tzinfo=timezone.utc)
-                        if dtm and (dtm >= now_dt - timedelta(hours=12)) and (
-                            dtm <= now_dt + timedelta(days=10)
+                        if (
+                            dtm
+                            and (dtm >= now_dt - timedelta(hours=12))
+                            and (dtm <= now_dt + timedelta(days=10))
                         ):
                             upcoming_weeks.append(int(wnum))
                             break
@@ -1376,6 +1418,7 @@ async def get_upcoming_odds(
                     continue
                 week_matches = weeks.get(wk, [])
                 rows = []
+
                 # Sort and filter to next-day-or-later to avoid past matches within the week window
                 def _ok_future_row(m) -> bool:
                     dtm = _parse_dt(m)
@@ -1385,7 +1428,9 @@ async def get_upcoming_odds(
                         dtm = dtm.replace(tzinfo=timezone.utc)
                     return dtm >= threshold_dt
 
-                week_sorted = sorted(week_matches, key=lambda x: (_parse_dt(x) or datetime.max))
+                week_sorted = sorted(
+                    week_matches, key=lambda x: (_parse_dt(x) or datetime.max)
+                )
                 for m in [mm for mm in week_sorted if _ok_future_row(mm)][:limit]:
                     home = (
                         m.get("home_team")
@@ -1454,10 +1499,20 @@ def api_admin_odds_prefetch_bovada():
 
 @app.post("/api/admin/odds/snapshot-csv")
 def api_admin_odds_snapshot_csv(
-    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
-    week: Optional[int] = Query(None, description="Optional game week tag to include in CSV"),
-    include_odds_api: bool = Query(True, description="If true, also append The Odds API bookmaker rows (if key set)"),
-    odds_api_bookmakers: Optional[str] = Query(None, description="Comma list to filter Odds API bookmakers for CSV (e.g., bet365,fanduel)"),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD) or ALL"
+    ),
+    week: Optional[int] = Query(
+        None, description="Optional game week tag to include in CSV"
+    ),
+    include_odds_api: bool = Query(
+        True,
+        description="If true, also append The Odds API bookmaker rows (if key set)",
+    ),
+    odds_api_bookmakers: Optional[str] = Query(
+        None,
+        description="Comma list to filter Odds API bookmakers for CSV (e.g., bet365,fanduel)",
+    ),
 ):
     """Append current provider odds into CSV historics under data/odds_history.
 
@@ -1501,7 +1556,9 @@ def api_admin_odds_snapshot_csv(
                     continue
                 payload = betting_odds_service._sport_cache.get(sport_key)
                 if payload:
-                    total_rows += append_h2h_from_oddsapi(lg, payload, week=week, bookmaker_filter=bk_list)
+                    total_rows += append_h2h_from_oddsapi(
+                        lg, payload, week=week, bookmaker_filter=bk_list
+                    )
         return {"success": True, "rows_appended": total_rows, "leagues": leagues}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CSV snapshot failed: {e}")
@@ -1515,10 +1572,20 @@ def api_cron_snapshot_csv(
     authorization: Optional[str] = Header(
         None, description="Authorization: Bearer <token> header (optional)"
     ),
-    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
-    week: Optional[int] = Query(None, description="Optional game week tag to include in CSV"),
-    include_odds_api: bool = Query(True, description="If true, also append The Odds API bookmaker rows (if key set)"),
-    odds_api_bookmakers: Optional[str] = Query(None, description="Comma list to filter Odds API bookmakers for CSV (e.g., bet365,fanduel)"),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD) or ALL"
+    ),
+    week: Optional[int] = Query(
+        None, description="Optional game week tag to include in CSV"
+    ),
+    include_odds_api: bool = Query(
+        True,
+        description="If true, also append The Odds API bookmaker rows (if key set)",
+    ),
+    odds_api_bookmakers: Optional[str] = Query(
+        None,
+        description="Comma list to filter Odds API bookmakers for CSV (e.g., bet365,fanduel)",
+    ),
 ):
     """Cron-friendly wrapper to append current provider odds into CSV historics under data/odds_history.
 
@@ -1576,8 +1643,12 @@ def api_cron_snapshot_csv(
 
 @app.get("/api/admin/blend-config")
 def api_admin_blend_config_get(
-    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN"),
-    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN"
+    ),
+    authorization: Optional[str] = Header(
+        None, description="Authorization: Bearer <token>"
+    ),
 ):
     """Read cache/model_blend.json so weights can be inspected/edited from the UI."""
     if not _cron_token_ok(token, authorization):
@@ -1598,8 +1669,12 @@ def api_admin_blend_config_get(
 @app.put("/api/admin/blend-config")
 def api_admin_blend_config_put(
     payload: Dict[str, Any] = Body(...),
-    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN"),
-    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN"
+    ),
+    authorization: Optional[str] = Header(
+        None, description="Authorization: Bearer <token>"
+    ),
 ):
     """Write cache/model_blend.json with the provided object."""
     if not _cron_token_ok(token, authorization):
@@ -1612,13 +1687,19 @@ def api_admin_blend_config_put(
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return {"success": True, "saved": str(path), "config": payload}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write blend config: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write blend config: {e}"
+        )
 
 
 @app.post("/api/cron/auto-tune-blend")
 def api_cron_auto_tune_blend(
-    token: Optional[str] = Query(None, description="Bearer token; must match REFRESH_CRON_TOKEN"),
-    authorization: Optional[str] = Header(None, description="Authorization: Bearer <token>"),
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN"
+    ),
+    authorization: Optional[str] = Header(
+        None, description="Authorization: Bearer <token>"
+    ),
 ):
     """Run auto-tuner to select per-league result market-blend weights using reconciled matches and historic market probs."""
     if not _cron_token_ok(token, authorization):
@@ -1668,7 +1749,9 @@ def api_admin_edges_warm(
             # Derive the next upcoming week for this league by real fixture dates,
             # falling back to the maximum week if no upcoming fixtures are found.
             from datetime import datetime, timezone, timedelta
+
             now_dt = datetime.now(timezone.utc)
+
             def _parse_dt(m):
                 d = m.get("utc_date") or m.get("date")
                 if not d:
@@ -1681,6 +1764,7 @@ def api_admin_edges_warm(
                     return d
                 except Exception:
                     return None
+
             upcoming_weeks = []
             for wnum, wmatches in weeks.items():
                 for m in wmatches:
@@ -1688,10 +1772,18 @@ def api_admin_edges_warm(
                     if dtm and dtm.tzinfo is None:
                         dtm = dtm.replace(tzinfo=timezone.utc)
                     # consider matches from a few hours in the past up to ~10 days ahead as "current cycle"
-                    if dtm and (dtm >= now_dt - timedelta(hours=12)) and (dtm <= now_dt + timedelta(days=10)):
+                    if (
+                        dtm
+                        and (dtm >= now_dt - timedelta(hours=12))
+                        and (dtm <= now_dt + timedelta(days=10))
+                    ):
                         upcoming_weeks.append(int(wnum))
                         break
-            wk = min(upcoming_weeks) if upcoming_weeks else (max(weeks.keys()) if weeks else None)
+            wk = (
+                min(upcoming_weeks)
+                if upcoming_weeks
+                else (max(weeks.keys()) if weeks else None)
+            )
             cnt = 0
             if wk and weeks.get(wk):
                 for m in weeks[wk]:
@@ -1958,7 +2050,14 @@ def api_admin_cron_summary():
     """Return timestamps and brief summaries for last cron runs."""
     out: Dict[str, Any] = {}
     try:
-        for name in ("refresh-bovada", "daily-update", "capture-closing", "snapshot-csv", "fetch-scores", "precompute-recommendations"):
+        for name in (
+            "refresh-bovada",
+            "daily-update",
+            "capture-closing",
+            "snapshot-csv",
+            "fetch-scores",
+            "precompute-recommendations",
+        ):
             p = _CRON_STATUS_DIR / f"{name}.json"
             if p.exists():
                 try:
@@ -1981,6 +2080,7 @@ def api_admin_cron_summary():
 # -------------------------------------------------------------
 # Recommendations precompute & serve
 # -------------------------------------------------------------
+
 
 @app.post("/api/cron/precompute-recommendations")
 def api_cron_precompute_recommendations(
@@ -2055,13 +2155,21 @@ def api_cron_precompute_recommendations(
                     if dtm and (dtm >= now_dt - timedelta(hours=6)):
                         upcoming_weeks.append(int(wnum))
                         break
-            wk = min(upcoming_weeks) if upcoming_weeks else (max(weeks.keys()) if weeks else None)
+            wk = (
+                min(upcoming_weeks)
+                if upcoming_weeks
+                else (max(weeks.keys()) if weeks else None)
+            )
             if not wk:
                 out_summary["leagues"][lg] = {"week": None, "saved": None}
                 continue
             # Compute compare_week_odds for this league & week (no live fetch)
             data = compare_week_odds(
-                int(wk), edge_threshold=edge_threshold, league=lg, use_live=False, prob_threshold=prob_threshold
+                int(wk),
+                edge_threshold=edge_threshold,
+                league=lg,
+                use_live=False,
+                prob_threshold=prob_threshold,
             )
             # Persist compact recommendations file
             rec_dir = Path("data/recommendations")
@@ -2069,7 +2177,11 @@ def api_cron_precompute_recommendations(
             path = rec_dir / f"{lg}_week{wk}.json"
             try:
                 Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
-                out_summary["leagues"][lg] = {"week": int(wk), "saved": str(path), "rows": len((data or {}).get("matches", []))}
+                out_summary["leagues"][lg] = {
+                    "week": int(wk),
+                    "saved": str(path),
+                    "rows": len((data or {}).get("matches", [])),
+                }
                 out_summary["saved"].append(str(path))
             except Exception as e:
                 out_summary["leagues"][lg] = {"week": int(wk), "error": str(e)}
@@ -2077,13 +2189,19 @@ def api_cron_precompute_recommendations(
         return {"success": True, **out_summary}
     except Exception as e:
         _write_cron_status("precompute-recommendations", {"error": str(e)})
-        raise HTTPException(status_code=500, detail=f"Precompute recommendations failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Precompute recommendations failed: {e}"
+        )
 
 
 @app.get("/api/recommendations/latest")
 def api_get_latest_recommendations(
-    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD)"),
-    week: Optional[int] = Query(None, description="Optional week override. If absent, returns most recent file."),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD)"
+    ),
+    week: Optional[int] = Query(
+        None, description="Optional week override. If absent, returns most recent file."
+    ),
 ):
     """Serve the latest saved recommendations JSON for a league.
 
@@ -2093,21 +2211,34 @@ def api_get_latest_recommendations(
         lg = (league or "PL").upper()
         rec_dir = Path("data/recommendations")
         if not rec_dir.exists():
-            raise HTTPException(status_code=404, detail="No recommendations available yet")
+            raise HTTPException(
+                status_code=404, detail="No recommendations available yet"
+            )
         if week is not None:
             p = rec_dir / f"{lg}_week{int(week)}.json"
             if not p.exists():
-                raise HTTPException(status_code=404, detail="Recommendations not found for requested week")
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recommendations not found for requested week",
+                )
             return json.loads(p.read_text(encoding="utf-8"))
         # pick latest by mtime
-        cand = sorted(rec_dir.glob(f"{lg}_week*.json"), key=lambda x: x.stat().st_mtime, reverse=True)
+        cand = sorted(
+            rec_dir.glob(f"{lg}_week*.json"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
         if not cand:
-            raise HTTPException(status_code=404, detail="No recommendations found for league")
+            raise HTTPException(
+                status_code=404, detail="No recommendations found for league"
+            )
         return json.loads(cand[0].read_text(encoding="utf-8"))
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load recommendations: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load recommendations: {e}"
+        )
 
 
 @app.get("/api/admin/status/config")
@@ -2117,7 +2248,9 @@ def api_admin_config_status():
     """
     try:
         cfg = {
-            "football_data_token_configured": bool(os.getenv("FOOTBALL_DATA_API_TOKEN")),
+            "football_data_token_configured": bool(
+                os.getenv("FOOTBALL_DATA_API_TOKEN")
+            ),
             "odds_api_key_configured": bool(os.getenv("ODDS_API_KEY")),
             "cron_token_configured": bool(os.getenv("REFRESH_CRON_TOKEN")),
             "allow_on_demand_predictions": _ALLOW_ON_DEMAND_PREDICTIONS,
@@ -2954,7 +3087,12 @@ async def api_games_by_date(
             ms.sort(key=lambda x: (x.get("utc_date") or x.get("date") or ""))
             out_groups.append({"date": day, "matches": ms})
 
-        payload = {"success": True, "groups": out_groups, "leagues": codes, "count": total}
+        payload = {
+            "success": True,
+            "groups": out_groups,
+            "leagues": codes,
+            "count": total,
+        }
         _BY_DATE_CACHE[cache_key] = {"payload": payload, "ts": _now}
         return payload
     except Exception as e:
@@ -3037,7 +3175,9 @@ async def get_game_week_details(
 
         # Determine lock policy: treat locks as PL-only (other leagues remain unlocked)
         _base_week_locked = week_snapshot_service.is_week_locked(week)
-        _is_locked_for_league = _base_week_locked if getattr(svc, "code", "PL") == "PL" else False
+        _is_locked_for_league = (
+            _base_week_locked if getattr(svc, "code", "PL") == "PL" else False
+        )
 
         # Add predictions for each match (robust to bad records)
         enhanced_matches = []
@@ -3467,7 +3607,9 @@ def api_corners_compare_week(
         from .services.league_manager import normalize_league_code
 
         code = normalize_league_code(league)
-        _key = f"corners_compare|{code}|{int(week)}|{float(line):.2f}|{edge_threshold:.3f}"
+        _key = (
+            f"corners_compare|{code}|{int(week)}|{float(line):.2f}|{edge_threshold:.3f}"
+        )
         _now = time.time()
         _ent = _COMPARE_CACHE.get(_key)
         if _ent and _now - float(_ent.get("ts", 0.0)) < _COMPARE_CACHE_TTL:
@@ -3508,7 +3650,11 @@ def api_totals_compare_week(
         if _ent and _now - float(_ent.get("ts", 0.0)) < _COMPARE_CACHE_TTL:
             return _ent.get("payload")
         data = compare_week_totals(
-            week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
+            week,
+            line=line,
+            edge_threshold=edge_threshold,
+            league=code,
+            use_live=use_live,
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -3538,7 +3684,11 @@ def api_firsthalf_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_first_half_totals(
-            week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
+            week,
+            line=line,
+            edge_threshold=edge_threshold,
+            league=code,
+            use_live=use_live,
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -3566,7 +3716,11 @@ def api_secondhalf_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_second_half_totals(
-            week, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
+            week,
+            line=line,
+            edge_threshold=edge_threshold,
+            league=code,
+            use_live=use_live,
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -3742,7 +3896,12 @@ def api_team_corners_compare_week(
 
         code = normalize_league_code(league)
         data = compare_week_team_corners_totals(
-            week, side=side, line=line, edge_threshold=edge_threshold, league=code, use_live=use_live
+            week,
+            side=side,
+            line=line,
+            edge_threshold=edge_threshold,
+            league=code,
+            use_live=use_live,
         )
         if isinstance(data, dict):
             data["league"] = code
@@ -4612,6 +4771,7 @@ async def api_week_report(week: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Report build failed: {e}")
 
+
 @app.get("/api/admin/weeks/{week}/performance-snapshot")
 def api_admin_week_performance_snapshot(week: int):
     """Compact weekly performance snapshot for dashboards.
@@ -4624,7 +4784,9 @@ def api_admin_week_performance_snapshot(week: int):
     try:
         final = week_snapshot_service.load_final(week)
         if not final:
-            raise HTTPException(status_code=404, detail="No final snapshot for this week")
+            raise HTTPException(
+                status_code=404, detail="No final snapshot for this week"
+            )
         rows = final.get("rows") or []
         metrics = final.get("metrics") or {}
         # pull edge aggregate from first row if present
@@ -4648,14 +4810,21 @@ def api_admin_week_performance_snapshot(week: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Performance snapshot failed: {e}")
 
+
 # Admin utility: fetch official final scores for a week and optionally reconcile
 @app.post("/api/admin/weeks/{week}/fetch-scores")
 def api_admin_fetch_scores_for_week(
     week: int,
-    competition: str = Query("PL", description="Competition code (e.g., PL, BL1, FL1, SA, PD)"),
+    competition: str = Query(
+        "PL", description="Competition code (e.g., PL, BL1, FL1, SA, PD)"
+    ),
     season: int = Query(2025, description="Season year, e.g., 2025 for 2025-26"),
-    auto_reconcile: bool = Query(True, description="If true, reconcile immediately after fetching"),
-    force_repredict: bool = Query(False, description="If true, recompute predictions during reconciliation"),
+    auto_reconcile: bool = Query(
+        True, description="If true, reconcile immediately after fetching"
+    ),
+    force_repredict: bool = Query(
+        False, description="If true, recompute predictions during reconciliation"
+    ),
 ):
     """Fetch final scores from Football-Data.org for a given week and optionally run reconciliation.
 
@@ -4687,7 +4856,9 @@ def api_admin_fetch_scores_for_week(
         except Exception:
             pass
         if isinstance(res, dict) and res.get("error"):
-            raise HTTPException(status_code=502, detail=f"Fetch scores failed: {res['error']}")
+            raise HTTPException(
+                status_code=502, detail=f"Fetch scores failed: {res['error']}"
+            )
         return {"success": True, "week": week, "result": res}
     except HTTPException:
         raise
@@ -4701,12 +4872,20 @@ def api_admin_get_manual_results(week: int):
     try:
         p = Path("data") / f"manual_results_week{week}.json"
         if not p.exists():
-            raise HTTPException(status_code=404, detail="Manual results file not found for this week")
+            raise HTTPException(
+                status_code=404, detail="Manual results file not found for this week"
+            )
         try:
             payload = json.loads(p.read_text(encoding="utf-8"))
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed reading manual results: {e}")
-        return {"week": week, "count": len(payload) if isinstance(payload, list) else 0, "rows": payload}
+            raise HTTPException(
+                status_code=500, detail=f"Failed reading manual results: {e}"
+            )
+        return {
+            "week": week,
+            "count": len(payload) if isinstance(payload, list) else 0,
+            "rows": payload,
+        }
     except HTTPException:
         raise
     except Exception as e:

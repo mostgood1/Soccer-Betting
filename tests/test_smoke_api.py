@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 # Speed up imports/startup in tests: skip training; avoid on-demand predictions.
 os.environ.setdefault("ML_SKIP_STARTUP_TRAIN", "1")
 os.environ.setdefault("ALLOW_ON_DEMAND_PREDICTIONS", "0")
+os.environ.setdefault("DISABLE_PROVIDER_CALLS", "1")
 
 from app.main import app  # noqa: E402
 

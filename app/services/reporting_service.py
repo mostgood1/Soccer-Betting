@@ -54,13 +54,21 @@ def compute_model_vs_market_summary(
             if not all(isinstance(pm.get(k), (int, float)) for k in ("H", "D", "A")):
                 continue
             # Use calibrated probabilities for fairness
-            pmc = calibration_service.apply_if_ready({"H": pm.get("H"), "D": pm.get("D"), "A": pm.get("A")}, league=lg)
-            home = normalize_team_name(r.get("home_team") or r.get("home")) or r.get("home_team")
-            away = normalize_team_name(r.get("away_team") or r.get("away")) or r.get("away_team")
+            pmc = calibration_service.apply_if_ready(
+                {"H": pm.get("H"), "D": pm.get("D"), "A": pm.get("A")}, league=lg
+            )
+            home = normalize_team_name(r.get("home_team") or r.get("home")) or r.get(
+                "home_team"
+            )
+            away = normalize_team_name(r.get("away_team") or r.get("away")) or r.get(
+                "away_team"
+            )
             if not (home and away):
                 continue
             mk_rec = hist_idx.get(f"{home.lower()}|{away.lower()}") or {}
-            cons = mk_rec.get("preferred_implied") or mk_rec.get("consensus_implied") or {}
+            cons = (
+                mk_rec.get("preferred_implied") or mk_rec.get("consensus_implied") or {}
+            )
             if not all(isinstance(cons.get(k), (int, float)) for k in ("H", "D", "A")):
                 continue
             s = cons["H"] + cons["D"] + cons["A"]
@@ -74,11 +82,20 @@ def compute_model_vs_market_summary(
             nll_m.append(_nll(pmc[res]))
             nll_k.append(_nll(mk[res]))
             # brier
-            br_m.append(sum((pmc[k] - (1.0 if k == res else 0.0)) ** 2 for k in ("H", "D", "A")))
-            br_k.append(sum((mk[k] - (1.0 if k == res else 0.0)) ** 2 for k in ("H", "D", "A")))
+            br_m.append(
+                sum((pmc[k] - (1.0 if k == res else 0.0)) ** 2 for k in ("H", "D", "A"))
+            )
+            br_k.append(
+                sum((mk[k] - (1.0 if k == res else 0.0)) ** 2 for k in ("H", "D", "A"))
+            )
             # accuracy
-            pick_m = max((("H", pmc["H"]), ("D", pmc["D"]), ("A", pmc["A"])) , key=lambda kv: kv[1])[0]
-            pick_k = max((("H", mk["H"]), ("D", mk["D"]), ("A", mk["A"])) , key=lambda kv: kv[1])[0]
+            pick_m = max(
+                (("H", pmc["H"]), ("D", pmc["D"]), ("A", pmc["A"])),
+                key=lambda kv: kv[1],
+            )[0]
+            pick_k = max(
+                (("H", mk["H"]), ("D", mk["D"]), ("A", mk["A"])), key=lambda kv: kv[1]
+            )[0]
             if pick_m == res:
                 acc_m += 1
             if pick_k == res:

@@ -30,13 +30,18 @@ def main():
 
     # Snapshot reconciliation store
     dump = reconciliation_store.dump()
-    print(json.dumps({
-        "season_stats": dump.get("season_stats"),
-        "weekly_stats_keys": list((dump.get("weekly_stats") or {}).keys())[:10],
-        "last_updated": dump.get("last_updated"),
-        "calibration_status": calibration_service.status(),
-        "completed_at": datetime.utcnow().isoformat() + 'Z'
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "season_stats": dump.get("season_stats"),
+                "weekly_stats_keys": list((dump.get("weekly_stats") or {}).keys())[:10],
+                "last_updated": dump.get("last_updated"),
+                "calibration_status": calibration_service.status(),
+                "completed_at": datetime.utcnow().isoformat() + "Z",
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

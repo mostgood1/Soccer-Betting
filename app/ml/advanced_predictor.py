@@ -46,7 +46,10 @@ except Exception:  # pragma: no cover
 
 from ..services.expected_goals_service import expected_goals_service
 from ..services.betting_odds_service import betting_odds_service
-from ..services.league_manager import get_service as _get_league_service, normalize_league_code as _norm_league
+from ..services.league_manager import (
+    get_service as _get_league_service,
+    normalize_league_code as _norm_league,
+)
 
 _BLEND_CONFIG_PATH = os.path.join("cache", "model_blend.json")
 
@@ -651,8 +654,10 @@ class AdvancedMLPredictor:
                             home_team, away_team, league
                         )
                     if not features_data:
-                        features_data = enhanced_epl_service.get_match_prediction_features(
-                            home_team, away_team
+                        features_data = (
+                            enhanced_epl_service.get_match_prediction_features(
+                                home_team, away_team
+                            )
                         )
                 else:
                     raise
@@ -847,7 +852,9 @@ class AdvancedMLPredictor:
                 try:
                     w_mkt = None
                     # Per-league override map takes precedence when league provided
-                    if league and isinstance(cfg.get("result_market_weight_by_league"), dict):
+                    if league and isinstance(
+                        cfg.get("result_market_weight_by_league"), dict
+                    ):
                         key = str(league).upper()
                         val = cfg["result_market_weight_by_league"].get(key)
                         if isinstance(val, (int, float)):
@@ -862,19 +869,23 @@ class AdvancedMLPredictor:
                 except Exception:
                     w_mkt = 0.0
                 if w_mkt and w_mkt > 0.0:
-                    prefer_bovada = (
-                        str(os.getenv("ML_MARKET_BLEND_BOVADA_ONLY", "1")).strip()
-                        in ("1", "true", "True")
-                    )
+                    prefer_bovada = str(
+                        os.getenv("ML_MARKET_BLEND_BOVADA_ONLY", "1")
+                    ).strip() in ("1", "true", "True")
                     mkt = betting_odds_service.get_match_odds(
-                        home_team, away_team, match_date=None, prefer_bovada_only=prefer_bovada
+                        home_team,
+                        away_team,
+                        match_date=None,
+                        prefer_bovada_only=prefer_bovada,
                     )
                     mw = (mkt or {}).get("market_odds") or {}
                     h2h = mw.get("match_winner") or {}
                     ph = (h2h.get("home") or {}).get("probability")
                     pd = (h2h.get("draw") or {}).get("probability")
                     pa = (h2h.get("away") or {}).get("probability")
-                    if all(isinstance(v, (int, float)) and v >= 0.0 for v in (ph, pd, pa)):
+                    if all(
+                        isinstance(v, (int, float)) and v >= 0.0 for v in (ph, pd, pa)
+                    ):
                         mkt_vec = np.array([float(pd), float(ph), float(pa)])
                         s = float(mkt_vec.sum())
                         if s > 0:
@@ -882,7 +893,9 @@ class AdvancedMLPredictor:
                             w_mkt = max(0.0, min(1.0, float(w_mkt)))
                             final_probs = (1.0 - w_mkt) * final_probs + w_mkt * mkt_vec
                             final_probs = final_probs / max(1e-12, final_probs.sum())
-                            predictions.setdefault("adjustments", {})["market_blend"] = {
+                            predictions.setdefault("adjustments", {})[
+                                "market_blend"
+                            ] = {
                                 "weight": w_mkt,
                                 "provider": mkt.get("provider"),
                                 "market_probs": {
@@ -983,7 +996,9 @@ class AdvancedMLPredictor:
                 cfg2 = _load_blend_config() or {}
                 try:
                     w_tot = None
-                    if league and isinstance(cfg2.get("totals_market_weight_by_league"), dict):
+                    if league and isinstance(
+                        cfg2.get("totals_market_weight_by_league"), dict
+                    ):
                         key = str(league).upper()
                         val = cfg2["totals_market_weight_by_league"].get(key)
                         if isinstance(val, (int, float)):
@@ -991,18 +1006,21 @@ class AdvancedMLPredictor:
                     if w_tot is None:
                         w_tot = float(
                             cfg2.get(
-                                "totals_market_weight", os.getenv("ML_TOTALS_MARKET_WEIGHT", "0.0")
+                                "totals_market_weight",
+                                os.getenv("ML_TOTALS_MARKET_WEIGHT", "0.0"),
                             )
                         )
                 except Exception:
                     w_tot = 0.0
                 if w_tot and w_tot > 0.0:
-                    prefer_bovada = (
-                        str(os.getenv("ML_MARKET_BLEND_BOVADA_ONLY", "1")).strip()
-                        in ("1", "true", "True")
-                    )
+                    prefer_bovada = str(
+                        os.getenv("ML_MARKET_BLEND_BOVADA_ONLY", "1")
+                    ).strip() in ("1", "true", "True")
                     mkt2 = betting_odds_service.get_match_odds(
-                        home_team, away_team, match_date=None, prefer_bovada_only=prefer_bovada
+                        home_team,
+                        away_team,
+                        match_date=None,
+                        prefer_bovada_only=prefer_bovada,
                     )
                     mo = (mkt2 or {}).get("market_odds") or {}
                     totals = mo.get("totals") or []
@@ -1012,7 +1030,11 @@ class AdvancedMLPredictor:
                     best_gap = 1e9
                     for row in totals:
                         try:
-                            line = float(row.get("line")) if row.get("line") is not None else None
+                            line = (
+                                float(row.get("line"))
+                                if row.get("line") is not None
+                                else None
+                            )
                         except Exception:
                             line = None
                         if line is None:
@@ -1024,10 +1046,14 @@ class AdvancedMLPredictor:
                     if chosen and isinstance(chosen.get("over"), dict):
                         p_over = chosen["over"].get("probability")
                         if isinstance(p_over, (int, float)) and p_over >= 0.0:
-                            base = float(predictions.get("over_2_5_goals_probability", 0.0))
+                            base = float(
+                                predictions.get("over_2_5_goals_probability", 0.0)
+                            )
                             w_tot = max(0.0, min(1.0, float(w_tot)))
                             blended = (1.0 - w_tot) * base + w_tot * float(p_over)
-                            predictions.setdefault("adjustments", {})["market_totals_blend"] = {
+                            predictions.setdefault("adjustments", {})[
+                                "market_totals_blend"
+                            ] = {
                                 "weight": w_tot,
                                 "provider": (mkt2 or {}).get("provider"),
                                 "line": chosen.get("line"),
@@ -1037,7 +1063,9 @@ class AdvancedMLPredictor:
                             }
                             predictions["over_2_5_goals_probability"] = float(blended)
             except Exception as e:
-                predictions.setdefault("adjustments", {})["market_totals_blend_error"] = str(e)
+                predictions.setdefault("adjustments", {})[
+                    "market_totals_blend_error"
+                ] = str(e)
             # BTTS from Poisson (1 - P(H=0) - P(A=0) + P(H=0,A=0))
             try:
                 if eg is None:
@@ -1375,15 +1403,27 @@ class AdvancedMLPredictor:
             away_supp = a_seed.get("suppression_factor", 1.0)
 
             # Effective attack/defense
-            home_attack_effective = home_attack * home_creation * home_finishing * home_tempo
-            away_attack_effective = away_attack * away_creation * away_finishing * away_tempo
+            home_attack_effective = (
+                home_attack * home_creation * home_finishing * home_tempo
+            )
+            away_attack_effective = (
+                away_attack * away_creation * away_finishing * away_tempo
+            )
             home_def_factor = home_def * home_supp
             away_def_factor = away_def * away_supp
 
-            home_goals_pg = round((home_attack_effective * 0.42) * (away_def_factor * 0.35), 4)
-            away_goals_pg = round((away_attack_effective * 0.42) * (home_def_factor * 0.35), 4)
-            home_concede_pg = round((away_attack_effective * 0.30) / max(home_def_factor, 0.3), 4)
-            away_concede_pg = round((home_attack_effective * 0.30) / max(away_def_factor, 0.3), 4)
+            home_goals_pg = round(
+                (home_attack_effective * 0.42) * (away_def_factor * 0.35), 4
+            )
+            away_goals_pg = round(
+                (away_attack_effective * 0.42) * (home_def_factor * 0.35), 4
+            )
+            home_concede_pg = round(
+                (away_attack_effective * 0.30) / max(home_def_factor, 0.3), 4
+            )
+            away_concede_pg = round(
+                (home_attack_effective * 0.30) / max(away_def_factor, 0.3), 4
+            )
 
             # Pairing variance
             pair_key = f"{h_team.get('name')}|{a_team.get('name')}|{code}"
@@ -1430,12 +1470,19 @@ class AdvancedMLPredictor:
                 "h2h_home_advantage": 0.15 + (home_form - away_form) * 0.05,
                 "h2h_avg_goals": h2h_avg_goals,
                 "h2h_over_2_5_rate": over_2_5_rate,
-                "home_advantage_multiplier": 1.08 + self._deterministic_value(f"hadv_{h_team.get('name')}", 0.0, 0.07),
-                "is_top_6_clash": (h_team.get("position", 20) <= 6) and (a_team.get("position", 20) <= 6),
-                "is_relegation_battle": (h_team.get("position", 0) >= 15) and (a_team.get("position", 0) >= 15),
+                "home_advantage_multiplier": 1.08
+                + self._deterministic_value(f"hadv_{h_team.get('name')}", 0.0, 0.07),
+                "is_top_6_clash": (h_team.get("position", 20) <= 6)
+                and (a_team.get("position", 20) <= 6),
+                "is_relegation_battle": (h_team.get("position", 0) >= 15)
+                and (a_team.get("position", 0) >= 15),
                 "strength_disparity": strength_disparity,
-                "attack_matchup_index": round(home_attack_effective / max(away_def_factor, 0.2), 4),
-                "defense_matchup_index": round(home_def_factor / max(away_attack_effective, 0.2), 4),
+                "attack_matchup_index": round(
+                    home_attack_effective / max(away_def_factor, 0.2), 4
+                ),
+                "defense_matchup_index": round(
+                    home_def_factor / max(away_attack_effective, 0.2), 4
+                ),
                 "form_gap": round(form_gap, 4),
                 "tempo_gap": round(home_tempo - away_tempo, 4),
                 "creation_gap": round(home_creation - away_creation, 4),
