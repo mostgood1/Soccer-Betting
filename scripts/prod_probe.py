@@ -159,6 +159,26 @@ def main() -> int:
         time.sleep(1)
         step("snapshot-csv", snapshot_csv)
 
+    # Kick precompute-recommendations (requires token)
+    if token and not args.skip_cron:
+
+        def precompute_recommendations():
+            r = _post(
+                base,
+                "/api/cron/precompute-recommendations",
+                token=token,
+                params={
+                    "league": "ALL",
+                    "edge_threshold": "0.03",
+                    "prob_threshold": "0.5",
+                },
+            )
+            print(r.status_code, r.text[:300])
+            r.raise_for_status()
+            return r.json()
+
+        step("precompute-recommendations", precompute_recommendations)
+
     # Cron summary
     def cron_summary():
         r = _get(base, "/api/admin/status/cron-summary")
@@ -207,6 +227,22 @@ def main() -> int:
         return r.json()
 
     step("odds-upcoming", odds_upcoming)
+
+    # Verify latest recommendations exist for given league
+    def recommendations_latest():
+        r = _get(base, "/api/recommendations/latest", params={"league": args.league})
+        print(r.status_code, r.text[:300])
+        if r.status_code == 404:
+            print("[warn] recommendations not yet available for this league")
+            return {"skipped": True}
+        r.raise_for_status()
+        j = r.json()
+        # Expect a dict with "matches" list
+        assert isinstance(j, dict)
+        _ = j.get("matches", [])
+        return {"count": len(_)}
+
+    step("recommendations-latest", recommendations_latest)
 
     print("\nSummary:")
     if failures:
