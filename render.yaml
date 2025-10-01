@@ -54,11 +54,32 @@ services:
         command: |
           TOKEN=${REFRESH_CRON_TOKEN:-} ; \
           curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/snapshot-csv?league=ALL&include_odds_api=true" -H "Authorization: Bearer $TOKEN"
-      - name: precompute-recommendations
+      # Split precompute per league to keep each call small and fast (reduce timeouts)
+      - name: precompute-PL
         schedule: "10 * * * *"  # hourly +10 minutes, after snapshots
         command: |
           TOKEN=${REFRESH_CRON_TOKEN:-} ; \
-          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=ALL&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=PL&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
+      - name: precompute-BL1
+        schedule: "11 * * * *"  # hourly +11 minutes
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=BL1&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
+      - name: precompute-FL1
+        schedule: "12 * * * *"  # hourly +12 minutes
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=FL1&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
+      - name: precompute-SA
+        schedule: "13 * * * *"  # hourly +13 minutes
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=SA&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
+      - name: precompute-PD
+        schedule: "14 * * * *"  # hourly +14 minutes
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/precompute-recommendations?league=PD&edge_threshold=0.03&prob_threshold=0.5" -H "Authorization: Bearer $TOKEN"
       - name: capture-closing-nightly
         schedule: "20 3 * * *"  # daily at 03:20 UTC (before reconciliation)
         command: |
