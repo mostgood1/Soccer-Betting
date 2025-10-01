@@ -326,6 +326,7 @@
       <span id="cron-daily-update">daily-update: —</span> ·
   <span id="cron-capture-closing">capture-closing: —</span> ·
   <span id="cron-snapshot-csv">snapshot-csv: —</span>
+      <div id="cron-precompute-leagues"></div>
     </div>
   </footer>
 
@@ -350,6 +351,17 @@
           if (cc) cc.textContent = fmt(data['capture-closing'], 'capture-closing');
           const sc = document.getElementById('cron-snapshot-csv');
           if (sc) sc.textContent = fmt(data['snapshot-csv'], 'snapshot-csv');
+          const tgt = document.getElementById('cron-precompute-leagues');
+          if (tgt) {
+            const leagues = ['PL','BL1','FL1','SA','PD'];
+            const chips = leagues.map(lg => {
+              const key = 'precompute-' + lg;
+              const obj = data[key];
+              if (!obj || !obj.timestamp) return `<span class="sb-chip" title="${lg}">${lg}: —</span>`;
+              return `<span class="sb-chip" title="${lg}">${lg}: ${ts(obj.timestamp)}</span>`;
+            });
+            tgt.innerHTML = `precompute: ${chips.join(' ')}`;
+          }
         })
         .catch(()=>{});
     })();
