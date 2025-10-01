@@ -1294,6 +1294,10 @@ async def get_upcoming_odds(
         True,
         description="If true, do not make provider network calls; use cache/snapshots only",
     ),
+    include_odds: bool = Query(
+        False,
+        description="If false, return fixtures only (no odds lookups) for speed",
+    ),
 ):
     """Get upcoming-week odds for each requested league (or ALL).
     Selects the next upcoming week per league by fixture dates and returns up to `limit` matches.
@@ -1395,10 +1399,13 @@ async def get_upcoming_odds(
                     dt = m.get("date") or m.get("utc_date")
                     if not (home and away):
                         continue
-                    odds = betting_odds_service.get_match_odds(home, away, dt, cache_only=cache_only)
-                    rows.append(
-                        {"home_team": home, "away_team": away, "date": dt, "odds": odds}
-                    )
+                    row = {"home_team": home, "away_team": away, "date": dt}
+                    if include_odds:
+                        odds = betting_odds_service.get_match_odds(
+                            home, away, dt, cache_only=cache_only
+                        )
+                        row["odds"] = odds
+                    rows.append(row)
                 out[lg] = {"week": wk, "count": len(rows), "matches": rows}
             except Exception:
                 out[lg] = {"week": None, "matches": []}
