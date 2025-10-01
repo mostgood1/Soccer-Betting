@@ -2057,6 +2057,12 @@ def api_admin_cron_summary():
             "snapshot-csv",
             "fetch-scores",
             "precompute-recommendations",
+            # Per-league precompute stamps if present on disk
+            "precompute-PL",
+            "precompute-BL1",
+            "precompute-FL1",
+            "precompute-SA",
+            "precompute-PD",
         ):
             p = _CRON_STATUS_DIR / f"{name}.json"
             if p.exists():
@@ -2177,14 +2183,29 @@ def api_cron_precompute_recommendations(
             path = rec_dir / f"{lg}_week{wk}.json"
             try:
                 Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+                rows = len((data or {}).get("matches", []))
                 out_summary["leagues"][lg] = {
                     "week": int(wk),
                     "saved": str(path),
-                    "rows": len((data or {}).get("matches", [])),
+                    "rows": rows,
                 }
                 out_summary["saved"].append(str(path))
+                # Write per-league cron status record
+                try:
+                    _write_cron_status(
+                        f"precompute-{lg}",
+                        {"league": lg, "week": int(wk), "saved": str(path), "rows": rows},
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 out_summary["leagues"][lg] = {"week": int(wk), "error": str(e)}
+                try:
+                    _write_cron_status(
+                        f"precompute-{lg}", {"league": lg, "week": int(wk), "error": str(e)}
+                    )
+                except Exception:
+                    pass
         _write_cron_status("precompute-recommendations", out_summary)
         return {"success": True, **out_summary}
     except Exception as e:
