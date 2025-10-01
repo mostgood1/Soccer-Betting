@@ -29,15 +29,44 @@ from .services.corners_market_service import reload_market_store
 from .services.goals_market_service import reload_goals_market_store
 from .services.historical_epl_service import historical_epl_service
 from .services.betting_odds_service import BettingOddsService
-from .services.odds_csv_store import (
-    append_h2h_from_bovada,
-    append_h2h_from_oddsapi,
-    append_totals_from_bovada,
-    append_totals_from_oddsapi,
-    append_results_from_fixtures,
-    append_goals_actuals_from_fixtures,
-    append_corners_actuals_from_store,
-)
+try:
+    from .services.odds_csv_store import (
+        append_h2h_from_bovada,
+        append_h2h_from_oddsapi,
+        append_totals_from_bovada,
+        append_totals_from_oddsapi,
+        append_results_from_fixtures,
+        append_goals_actuals_from_fixtures,
+        append_corners_actuals_from_store,
+    )
+except ImportError as _e:
+    print(f"[WARN] odds_csv_store import mismatch: {_e}; using safe stubs where missing.")
+    # Attempt partial import for the ones that exist
+    try:
+        from .services.odds_csv_store import (
+            append_h2h_from_bovada,
+            append_h2h_from_oddsapi,
+            append_results_from_fixtures,
+            append_goals_actuals_from_fixtures,
+            append_corners_actuals_from_store,
+        )
+    except Exception:
+        def append_h2h_from_bovada(*args, **kwargs):
+            return 0
+        def append_h2h_from_oddsapi(*args, **kwargs):
+            return 0
+        def append_results_from_fixtures(*args, **kwargs):
+            return 0
+        def append_goals_actuals_from_fixtures(*args, **kwargs):
+            return 0
+        def append_corners_actuals_from_store(*args, **kwargs):
+            return 0
+
+    # Always provide stubs for totals functions when missing
+    def append_totals_from_bovada(*args, **kwargs):
+        return 0
+    def append_totals_from_oddsapi(*args, **kwargs):
+        return 0
 from .services.enhanced_player_stats_service import EnhancedPlayerStatsService
 from .services.fbrefdata_service import fbrefdata_service
 from .services.enhanced_historical_data_service import EnhancedHistoricalDataService
