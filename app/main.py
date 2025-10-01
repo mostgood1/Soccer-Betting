@@ -69,6 +69,7 @@ except ImportError as _e:
         return 0
 from .services.enhanced_player_stats_service import EnhancedPlayerStatsService
 from .services.fbrefdata_service import fbrefdata_service
+from .services.fbrapi_service import fbrapi_service
 from .services.enhanced_historical_data_service import EnhancedHistoricalDataService
 from .services.game_week_service import game_week_service, reconciliation_service
 from .services.corners_actuals_service import corners_actuals_store
@@ -2501,6 +2502,13 @@ def api_admin_cron_summary():
             "snapshot-csv",
             "fetch-scores",
             "precompute-recommendations",
+            # FBR API schedule backfill summaries
+            "fbrapi-backfill-schedule",
+            "fbrapi-backfill-schedule-PL",
+            "fbrapi-backfill-schedule-BL1",
+            "fbrapi-backfill-schedule-FL1",
+            "fbrapi-backfill-schedule-SA",
+            "fbrapi-backfill-schedule-PD",
             # Per-league precompute stamps if present on disk
             "precompute-PL",
             "precompute-BL1",
@@ -5956,6 +5964,68 @@ def api_admin_fbrefdata_ingest_local(
         res = fbrefdata_service.ingest_local(league=league, season=season)
         return {"success": True, **res.to_dict()}
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/admin/fbrapi/backfill-schedule")
+def api_admin_fbrapi_backfill_schedule(
+    league: str = Query("PL", description="League code PL/BL1/FL1/SA/PD"),
+    season: Optional[str] = Query(None, description="Season string e.g. 2025-2026; default current"),
+):
+    try:
+        res = fbrapi_service.backfill_schedule(league=league, season=season)
+        return {"success": True, **res.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/cron/fbrapi/backfill-schedule")
+def api_cron_fbrapi_backfill_schedule(
+    league: str = Query(
+        "ALL",
+        description="League code or ALL: PL, BL1, FL1, SA, PD",
+    ),
+    season: Optional[str] = Query(
+        None, description="Season string e.g. 2025-2026; default current"
+    ),
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN env var (if set)"
+    ),
+    authorization: Optional[str] = Header(None),
+):
+    """Cron-friendly wrapper to backfill schedules via FBR API.
+    - Supports league=ALL to iterate across primary European leagues.
+    - Writes cron status artifacts under data/cron for ops visibility.
+    """
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid cron token")
+    try:
+        if league.upper() == "ALL":
+            try:
+                leagues = list_supported_leagues()
+                leagues = [c for c in ["PL", "BL1", "FL1", "SA", "PD"] if c in set([l.upper() for l in leagues])] or ["PL", "BL1", "FL1", "SA", "PD"]
+            except Exception:
+                leagues = ["PL", "BL1", "FL1", "SA", "PD"]
+        else:
+            leagues = [league.upper()]
+
+        runs: List[Dict[str, Any]] = []
+        for lg in leagues:
+            try:
+                res = fbrapi_service.backfill_schedule(league=lg, season=season)
+                payload = {"league": lg, **res.to_dict()}
+                runs.append(payload)
+                _write_cron_status(f"fbrapi-backfill-schedule-{lg}", payload)
+            except Exception as ie:
+                err = {"league": lg, "error": str(ie)}
+                runs.append(err)
+                _write_cron_status(f"fbrapi-backfill-schedule-{lg}", err)
+
+        summary = {"success": True, "season": season, "runs": runs}
+        _write_cron_status("fbrapi-backfill-schedule", summary)
+        return summary
+    except Exception as e:
+        _write_cron_status("fbrapi-backfill-schedule", {"error": str(e)})
         return {"success": False, "error": str(e)}
 
 

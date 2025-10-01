@@ -25,6 +25,9 @@ services:
       # Token to protect cron endpoints (optional but recommended)
       - key: REFRESH_CRON_TOKEN
         sync: false
+      # Optional: FBR API access (will auto-generate if absent)
+      - key: FBR_API_KEY
+        sync: false
       # Optional: publish daily summary JSON to GitHub
       - key: GITHUB_TOKEN
         sync: false
@@ -115,6 +118,11 @@ services:
         command: |
           TOKEN=${REFRESH_CRON_TOKEN:-} ; \
           curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/fbrefdata/backfill?league=ALL" -H "Authorization: Bearer $TOKEN"
+      - name: fbrapi-backfill-schedule-nightly
+        schedule: "55 3 * * *"  # daily at 03:55 UTC, use API provider for schedules
+        command: |
+          TOKEN=${REFRESH_CRON_TOKEN:-} ; \
+          curl -s -X POST "http://localhost:${PORT:-8000}/api/cron/fbrapi/backfill-schedule?league=ALL" -H "Authorization: Bearer $TOKEN"
       - name: fetch-corners-fbref-PL
         schedule: "0 2 * * 1"  # weekly Monday 02:00 UTC
         command: |
