@@ -161,33 +161,40 @@ def main() -> int:
         time.sleep(1)
         step("snapshot-csv", snapshot_csv)
 
-    # Kick precompute-recommendations (requires token)
+    # Kick precompute-recommendations (requires token). Do per-league calls to avoid a single long request.
     if token and not args.skip_cron:
-
-        def precompute_recommendations():
+        def precompute_one(lg: str):
             r = _post(
                 base,
                 "/api/cron/precompute-recommendations",
                 token=token,
                 params={
-                    "league": "ALL",
+                    "league": lg,
                     "edge_threshold": "0.03",
                     "prob_threshold": "0.5",
                 },
+                timeout=120,
             )
-            print(r.status_code, r.text[:300])
+            print("precompute", lg, r.status_code, r.text[:200])
             r.raise_for_status()
             return r.json()
 
-        step("precompute-recommendations", precompute_recommendations)
+        for lg in ["PL", "BL1", "FL1", "SA", "PD"]:
+            try:
+                step(f"precompute-{lg}", lambda lg=lg: precompute_one(lg))
+                time.sleep(0.5)
+            except Exception:
+                failures.append(f"precompute-{lg}")
 
     # Cron summary
     def cron_summary():
-        r = _get(base, "/api/admin/status/cron-summary")
+        r = _get(base, "/api/admin/status/cron-summary", timeout=60)
         print(r.status_code, r.text[:300])
         r.raise_for_status()
         return r.json()
 
+    # Allow a brief moment for cron-status files to be written
+    time.sleep(0.5)
     step("cron-summary", cron_summary)
 
     # Odds, match (single sample)
