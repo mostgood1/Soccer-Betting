@@ -32,8 +32,14 @@ from .services.betting_odds_service import BettingOddsService
 from .services.odds_csv_store import (
     append_h2h_from_bovada,
     append_h2h_from_oddsapi,
+    append_totals_from_bovada,
+    append_totals_from_oddsapi,
+    append_results_from_fixtures,
+    append_goals_actuals_from_fixtures,
+    append_corners_actuals_from_store,
 )
 from .services.enhanced_player_stats_service import EnhancedPlayerStatsService
+from .services.fbrefdata_service import fbrefdata_service
 from .services.enhanced_historical_data_service import EnhancedHistoricalDataService
 from .services.game_week_service import game_week_service, reconciliation_service
 from .services.corners_actuals_service import corners_actuals_store
@@ -64,6 +70,7 @@ from .services.football_data_multi_service import FootballDataMultiService
 from .services.team_branding import get_team_branding
 from .services.week_snapshot_service import WeekSnapshotService
 from shutil import copyfile
+import subprocess
 
 # Attempt model load/train at startup for real predictions (can be skipped via env)
 if os.getenv("ML_SKIP_STARTUP_TRAIN", "0") == "1":
@@ -264,6 +271,9 @@ def _regenerate_predictions_for_league(league: str) -> Dict[str, Any]:
         }
     except Exception as e:
         return {"league": league, "error": str(e)}
+
+
+ 
 
 
 # -------------------------------------------------------------
@@ -705,6 +715,14 @@ async def _debug_startup_event():
             pass
     except Exception as _e:
         print(f"[HYDRATE] Startup hydration skipped due to error: {_e}")
+
+    # Expose fbrefdata status in logs (best-effort)
+    try:
+        from .services.fbrefdata_service import fbrefdata_service as _fbsvc
+
+        print(f"[FBREFDATA] available={_fbsvc.is_available} base_dir={_fbsvc.base_dir}")
+    except Exception:
+        pass
 
     # Non-blocking bootstrap: warm odds and ensure predictions cache exists when
     # on-demand predictions are disabled in production (e.g., Render). We run this
@@ -1282,6 +1300,9 @@ async def get_week_betting_odds(
             week_matches, key=lambda x: (_parse_dt(x) or datetime.max)
         )
         filtered = [m for m in week_matches_sorted if _ok_future(m)]
+        # If everything got filtered out (e.g., past week), fall back to full week
+        if threshold_dt and not filtered and week_matches_sorted:
+            filtered = list(week_matches_sorted)
         out = []
         for m in filtered[:limit]:
             home = (
@@ -1533,6 +1554,11 @@ def api_admin_odds_snapshot_csv(
             snap = betting_odds_service._bovada_cache.get(lg) or {}
             events = snap.get("events") or []
             total_rows += append_h2h_from_bovada(lg, events, week=week)
+            # Also persist totals markets when present
+            try:
+                total_rows += append_totals_from_bovada(lg, events, week=week)
+            except Exception:
+                pass
         # Optionally, append from The Odds API per-sport snapshots
         if include_odds_api and betting_odds_service.odds_api_key:
             # refresh Odds API snapshots
@@ -1562,6 +1588,228 @@ def api_admin_odds_snapshot_csv(
         return {"success": True, "rows_appended": total_rows, "leagues": leagues}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"CSV snapshot failed: {e}")
+
+
+@app.post("/api/admin/goals/snapshot-csv")
+def api_admin_goals_totals_snapshot_csv(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    week: Optional[int] = Query(None, description="Optional game week"),
+    bookmakers: Optional[str] = Query(None, description="Comma-list to filter bookmakers"),
+):
+    """Append goals totals (O/U) from The Odds API into totals_{LEAGUE}.csv."""
+    try:
+        if not betting_odds_service.odds_api_key:
+            return {"success": False, "error": "ODDS_API_KEY not set"}
+        leagues = [
+            league.upper()
+            if league and league.upper() != "ALL"
+            else lg
+            for lg in ["PL", "BL1", "FL1", "SA", "PD"]
+        ]
+        total_rows = 0
+        betting_odds_service.prefetch()  # refresh Odds API cache
+        sport_map = {
+            "PL": "soccer_epl",
+            "BL1": "soccer_germany_bundesliga",
+            "FL1": "soccer_france_ligue_one",
+            "SA": "soccer_italy_serie_a",
+            "PD": "soccer_spain_la_liga",
+        }
+        bk_list = (
+            [s.strip() for s in (bookmakers or "").split(",") if s.strip()]
+            if bookmakers
+            else None
+        )
+        for lg in leagues:
+            key = sport_map.get(lg)
+            if not key:
+                continue
+            payload = betting_odds_service._sport_cache.get(key) or {}
+            if payload:
+                total_rows += append_totals_from_oddsapi(lg, payload, week=week, bookmaker_filter=bk_list)
+        return {"success": True, "rows_appended": total_rows, "leagues": leagues}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Goals totals CSV snapshot failed: {e}")
+
+
+@app.post("/api/cron/goals/snapshot-csv")
+def api_cron_goals_totals_snapshot_csv(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    league: Optional[str] = Query(None),
+    week: Optional[int] = Query(None),
+    bookmakers: Optional[str] = Query(None),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        res = api_admin_goals_totals_snapshot_csv(league=league, week=week, bookmakers=bookmakers)  # type: ignore
+        _write_cron_status("snapshot-goals-csv", res if isinstance(res, dict) else {"result": res})
+        return res
+    except Exception as e:
+        _write_cron_status("snapshot-goals-csv", {"error": str(e)})
+        raise
+
+
+@app.post("/api/admin/results/snapshot-csv")
+def api_admin_results_snapshot_csv(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    week: Optional[int] = Query(None, description="Optional game week override"),
+):
+    """Append completed match results to results_{LEAGUE}.csv using Football-Data.org caches."""
+    try:
+        leagues = [
+            league.upper()
+            if league and league.upper() != "ALL"
+            else lg
+            for lg in ["PL", "BL1", "FL1", "SA", "PD"]
+        ]
+        total_rows = 0
+        # Load fixtures per league from football-data caches
+        # Map leagues to file names
+        file_map = {
+            "PL": "football_data_PL_2025_2026.json",
+            "BL1": "football_data_BL1_2025_2026.json",
+            "FL1": "football_data_FL1_2025_2026.json",
+            "SA": "football_data_SA_2025_2026.json",
+            "PD": "football_data_PD_2025_2026.json",
+        }
+        for lg in leagues:
+            fname = file_map.get(lg)
+            if not fname:
+                continue
+            path = Path("data") / fname
+            payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            fixtures = payload.get("converted_fixtures") or []
+            total_rows += append_results_from_fixtures(lg, fixtures, week=week)
+        return {"success": True, "rows_appended": total_rows, "leagues": leagues}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Results CSV snapshot failed: {e}")
+
+
+@app.post("/api/admin/actuals/snapshot-csv")
+def api_admin_actuals_snapshot_csv(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    week: Optional[int] = Query(None, description="Optional game week override"),
+):
+    """Append goals_actuals and corners_actuals from fixtures/corners store into CSVs."""
+    try:
+        leagues = [
+            league.upper()
+            if league and league.upper() != "ALL"
+            else lg
+            for lg in ["PL", "BL1", "FL1", "SA", "PD"]
+        ]
+        file_map = {
+            "PL": "football_data_PL_2025_2026.json",
+            "BL1": "football_data_BL1_2025_2026.json",
+            "FL1": "football_data_FL1_2025_2026.json",
+            "SA": "football_data_SA_2025_2026.json",
+            "PD": "football_data_PD_2025_2026.json",
+        }
+        results = {"goals_rows": 0, "corners_rows": 0}
+        for lg in leagues:
+            path = Path("data") / file_map.get(lg, "")
+            payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            fixtures = payload.get("converted_fixtures") or []
+            results["goals_rows"] += append_goals_actuals_from_fixtures(lg, fixtures, week=week)
+            results["corners_rows"] += append_corners_actuals_from_store(lg, fixtures, week=week)
+        return {"success": True, **results, "leagues": leagues}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Actuals CSV snapshot failed: {e}")
+
+
+@app.post("/api/cron/actuals/snapshot-csv")
+def api_cron_actuals_snapshot_csv(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    league: Optional[str] = Query(None),
+    week: Optional[int] = Query(None),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        res = api_admin_actuals_snapshot_csv(league=league, week=week)  # type: ignore
+        _write_cron_status("snapshot-actuals-csv", res if isinstance(res, dict) else {"result": res})
+        return res
+    except Exception as e:
+        _write_cron_status("snapshot-actuals-csv", {"error": str(e)})
+        raise
+
+
+@app.post("/api/admin/corners/fetch-fbref")
+def api_admin_corners_fetch_fbref(
+    league: str = Query("PL", description="League code: PL, BL1, FL1, SA, PD"),
+    weeks: str = Query("1-38", description="Week list or ranges, e.g., 1-6,8,10-12"),
+    use_fbref: bool = Query(False, description="Allow network fetch via soccerdata/FBref"),
+    out: Optional[str] = Query(None, description="Override output CSV path"),
+):
+    """Run the FBref importer for corners actuals for a specific league and weeks.
+
+    Writes to data/corners_actuals_2025_26.csv by default.
+    """
+    try:
+        out_path = out or str(Path("data") / "corners_actuals_2025_26.csv")
+        # Build python -m app.tools.fetch_corners_fbref arguments
+        py = Path(".venv") / "Scripts" / "python.exe"
+        if not py.exists():
+            # fallback to env python
+            py = Path("python")
+        args = [
+            str(py),
+            "-m",
+            "app.tools.fetch_corners_fbref",
+            "--league",
+            str(league),
+            "--weeks",
+            str(weeks),
+            "--out",
+            out_path,
+        ]
+        if use_fbref:
+            args.append("--use-fbref")
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=900)
+        ok = proc.returncode == 0
+        if not ok:
+            raise RuntimeError(proc.stderr or proc.stdout)
+        # After write, reload store and append to corners_actuals CSVs per fixtures mapping
+        reload_corners_store()
+        # Also append to league-specific corners_actuals CSV using fixtures to ensure match filter
+        file_map = {
+            "PL": "football_data_PL_2025_2026.json",
+            "BL1": "football_data_BL1_2025_2026.json",
+            "FL1": "football_data_FL1_2025_2026.json",
+            "SA": "football_data_SA_2025_2026.json",
+            "PD": "football_data_PD_2025_2026.json",
+        }
+        fname = file_map.get(league.upper())
+        appended = 0
+        if fname:
+            p = Path("data") / fname
+            payload = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+            fixtures = payload.get("converted_fixtures") or []
+            appended = append_corners_actuals_from_store(league.upper(), fixtures)
+        return {"success": True, "appended": appended, "stdout": proc.stdout[:500]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Corners fetch failed: {e}")
+
+
+@app.post("/api/cron/results/snapshot-csv")
+def api_cron_results_snapshot_csv(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    league: Optional[str] = Query(None),
+    week: Optional[int] = Query(None),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        res = api_admin_results_snapshot_csv(league=league, week=week)  # type: ignore
+        _write_cron_status("snapshot-results-csv", res if isinstance(res, dict) else {"result": res})
+        return res
+    except Exception as e:
+        _write_cron_status("snapshot-results-csv", {"error": str(e)})
+        raise
 
 
 @app.post("/api/cron/snapshot-csv")
@@ -1609,6 +1857,10 @@ def api_cron_snapshot_csv(
             snap = betting_odds_service._bovada_cache.get(lg) or {}
             events = snap.get("events") or []
             total_rows += append_h2h_from_bovada(lg, events, week=week)
+            try:
+                total_rows += append_totals_from_bovada(lg, events, week=week)
+            except Exception:
+                pass
         # Optionally, append from The Odds API per-sport snapshots
         if include_odds_api and betting_odds_service.odds_api_key:
             betting_odds_service.prefetch()
@@ -1845,6 +2097,169 @@ def api_admin_daily_update(
         return {"success": True, "result": out}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Daily update failed: {e}")
+
+
+@app.post("/api/admin/corners/snapshot-csv")
+def api_admin_corners_snapshot_csv(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    historical: bool = Query(False, description="Attempt historical odds endpoints if supported"),
+    bookmakers: Optional[str] = Query(None, description="Comma-list of bookmakers to include"),
+):
+    """Fetch corners totals from The Odds API and append to data/odds_history/corners_totals_{LEAGUE}.csv
+    Records are compatible with corners_market_service and can be used for reconciliation & tuning.
+    """
+    try:
+        leagues = (
+            [league.upper()] if league and league.upper() != "ALL" else ["PL", "BL1", "FL1", "SA", "PD"]
+        )
+        from .services.odds_api_corners_service import _env, fetch_corners_totals_from_odds_api
+        if not _env("ODDS_API_KEY"):
+            return {"success": False, "error": "ODDS_API_KEY not set"}
+        # Map leagues to sport keys
+        sport_map = {
+            "PL": "soccer_epl",
+            "BL1": "soccer_germany_bundesliga",
+            "FL1": "soccer_france_ligue_one",
+            "SA": "soccer_italy_serie_a",
+            "PD": "soccer_spain_la_liga",
+        }
+        import csv as _csv
+        from pathlib import Path as _P
+        base = _P("data/odds_history")
+        base.mkdir(parents=True, exist_ok=True)
+        header = [
+            "timestamp",
+            "league",
+            "week",
+            "source",
+            "bookmaker",
+            "match_date",
+            "commence_time",
+            "home_team",
+            "away_team",
+            "market",
+            "outcome",
+            "line",
+            "decimal_odds",
+            "american_odds",
+            "implied_prob",
+            "book_overround",
+        ]
+        total_rows = 0
+        now = datetime.utcnow().isoformat() + "Z"
+        for lg in leagues:
+            sport_key = sport_map.get(lg)
+            if not sport_key:
+                continue
+            resp = fetch_corners_totals_from_odds_api(
+                sport_key=sport_key,
+                historical=bool(historical or os.getenv("ODDS_API_ALLOW_HISTORICAL", "0") == "1"),
+                bookmakers=bookmakers,
+            )
+            rows = resp.get("records") or []
+            if not rows:
+                continue
+            # Write CSV for corners totals under odds_history
+            p = base / f"corners_totals_{lg}.csv"
+            if not p.exists():
+                with p.open("w", newline="", encoding="utf-8") as f:
+                    _csv.writer(f).writerow(header)
+            with p.open("a", newline="", encoding="utf-8") as f:
+                w = _csv.writer(f)
+                for r in rows:
+                    date = r.get("date")
+                    if isinstance(date, str) and "T" in date:
+                        match_date = date.split("T")[0]
+                    else:
+                        match_date = date or ""
+                    home = r.get("home_team")
+                    away = r.get("away_team")
+                    line = r.get("line")
+                    over_odds = r.get("over_odds")
+                    under_odds = r.get("under_odds")
+                    bm = r.get("bookmaker") or "unknown"
+                    # Write two rows: over and under
+                    if over_odds:
+                        try:
+                            ip = (1.0 / float(over_odds)) if float(over_odds) > 1.0 else None
+                        except Exception:
+                            ip = None
+                        w.writerow(
+                            [
+                                now,
+                                lg,
+                                "",
+                                "oddsapi",
+                                str(bm).lower(),
+                                match_date,
+                                date or "",
+                                home,
+                                away,
+                                "corners_total",
+                                "over",
+                                line,
+                                over_odds,
+                                "",
+                                round(ip, 6) if isinstance(ip, float) else "",
+                                "",
+                            ]
+                        )
+                        total_rows += 1
+                    if under_odds:
+                        try:
+                            ip = (1.0 / float(under_odds)) if float(under_odds) > 1.0 else None
+                        except Exception:
+                            ip = None
+                        w.writerow(
+                            [
+                                now,
+                                lg,
+                                "",
+                                "oddsapi",
+                                str(bm).lower(),
+                                match_date,
+                                date or "",
+                                home,
+                                away,
+                                "corners_total",
+                                "under",
+                                line,
+                                under_odds,
+                                "",
+                                round(ip, 6) if isinstance(ip, float) else "",
+                                "",
+                            ]
+                        )
+                        total_rows += 1
+        return {"success": True, "rows_appended": total_rows, "leagues": leagues}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Corners CSV snapshot failed: {e}")
+
+
+@app.post("/api/cron/corners/snapshot-csv")
+def api_cron_corners_snapshot_csv(
+    token: Optional[str] = Query(
+        None, description="Bearer token; must match REFRESH_CRON_TOKEN env var"
+    ),
+    authorization: Optional[str] = Header(
+        None, description="Authorization: Bearer <token> header (optional)"
+    ),
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    historical: bool = Query(False),
+    bookmakers: Optional[str] = Query(None),
+):
+    if not _cron_token_ok(token, authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        res = api_admin_corners_snapshot_csv(league=league, historical=historical, bookmakers=bookmakers)  # type: ignore
+        try:
+            _write_cron_status("snapshot-corners-csv", res if isinstance(res, dict) else {"result": res})
+        except Exception:
+            pass
+        return res
+    except Exception as e:
+        _write_cron_status("snapshot-corners-csv", {"error": str(e)})
+        raise
 
 
 # -------------------------------------------------------------
@@ -3475,6 +3890,57 @@ async def get_week_reconciliation(
             if hasattr(svc, "get_all_matches")
             else enhanced_epl_service.get_all_matches()
         )
+        # Overlay manual results if available to ensure completed flags/scores are present
+        try:
+            from pathlib import Path as _P
+
+            p = _P("data") / f"manual_results_week{int(week)}.json"
+            if p.exists():
+                rows = []
+                try:
+                    rows = json.loads(p.read_text(encoding="utf-8")) or []
+                except Exception:
+                    rows = []
+                if rows:
+                    # Build indices for efficient overlay: by id and by normalized pair
+                    idx_by_id = {}
+                    idx_by_pair = {}
+                    for m in matches:
+                        mid = m.get("id") or m.get("match_id")
+                        ht = normalize_team_name(
+                            m.get("home_team")
+                            or m.get("homeTeam")
+                            or (m.get("home") or {}).get("name")
+                        )
+                        at = normalize_team_name(
+                            m.get("away_team")
+                            or m.get("awayTeam")
+                            or (m.get("away") or {}).get("name")
+                        )
+                        if mid is not None:
+                            idx_by_id[mid] = m
+                        if ht and at:
+                            idx_by_pair[(ht, at)] = m
+                    for r in rows:
+                        mid = r.get("match_id")
+                        ht = normalize_team_name(r.get("home_team") or r.get("home"))
+                        at = normalize_team_name(r.get("away_team") or r.get("away"))
+                        target = idx_by_id.get(mid) if mid is not None else None
+                        if not target and ht and at:
+                            target = idx_by_pair.get((ht, at))
+                        if not target:
+                            continue
+                        hs = r.get("home_score")
+                        as_ = r.get("away_score")
+                        if hs is None or as_ is None:
+                            continue
+                        target["home_score"] = hs
+                        target["away_score"] = as_
+                        target["status"] = "COMPLETED"
+                        target["is_completed"] = True
+        except Exception:
+            pass
+
         # Enrich with latest corners actuals (authoritative) prior to reconciliation
         try:
             for m in matches:
@@ -3512,8 +3978,21 @@ async def get_week_reconciliation(
                 status_code=404, detail=f"No matches found for week {week}"
             )
 
-        # Process only completed matches
-        completed_matches = [m for m in week_matches if m.get("is_completed")]
+        # Process only completed matches (by status flag OR presence of scores)
+        def _is_completed(m: Dict[str, Any]) -> bool:
+            try:
+                status = (m.get("status") or "").upper()
+            except Exception:
+                status = ""
+            hs = m.get("home_score") if "home_score" in m else m.get("homeScore")
+            as_ = m.get("away_score") if "away_score" in m else m.get("awayScore")
+            return bool(
+                m.get("is_completed")
+                or status in ["FINISHED", "COMPLETED"]
+                or (hs is not None and as_ is not None)
+            )
+
+        completed_matches = [m for m in week_matches if _is_completed(m)]
 
         reconciliations = []
         for match in completed_matches:
@@ -3527,8 +4006,16 @@ async def get_week_reconciliation(
                 )
                 cache_key = f"{match.get('id') or match.get('match_id')}_{home}_{away}"
                 predictions = _PREDICTION_CACHE.get(cache_key)
-                if not predictions and _ALLOW_ON_DEMAND_PREDICTIONS:
-                    predictions = _build_normalized_prediction(home, away, league=None)
+                # For reconciliation, build a prediction on-demand if missing (limited to completed matches)
+                if not predictions:
+                    # Use league-aware calibration when possible
+                    try:
+                        from .services.league_manager import normalize_league_code as _norm_league
+
+                        lg = _norm_league(league)
+                    except Exception:
+                        lg = None
+                    predictions = _build_normalized_prediction(home, away, league=lg)
                     if predictions:
                         _PREDICTION_CACHE[cache_key] = predictions
                 reconciliation = reconciliation_service.reconcile_match_predictions(
@@ -5385,6 +5872,62 @@ async def api_backfill_corners_actuals(
         raise HTTPException(
             status_code=500, detail=f"Failed to backfill corners actuals: {e}"
         )
+
+
+# FBrefData primary backfill endpoints (admin + cron)
+@app.post("/api/admin/fbrefdata/backfill")
+def api_admin_fbrefdata_backfill(
+    league: str = Query("PL", description="League code PL/BL1/FL1/SA/PD"),
+    season: Optional[str] = Query(None, description="Season string e.g. 2025-2026"),
+    include_schedule: bool = Query(True),
+    include_players: bool = Query(True),
+):
+    try:
+        res = fbrefdata_service.backfill(
+            league=league,
+            season=season,
+            include_schedule=include_schedule,
+            include_players=include_players,
+        )
+        return {"success": True, **res.to_dict(), "is_available": fbrefdata_service.is_available}
+    except Exception as e:
+        return {"success": False, "error": str(e), "is_available": fbrefdata_service.is_available}
+
+
+@app.post("/api/cron/fbrefdata/backfill")
+def api_cron_fbrefdata_backfill(
+    request: Request,
+    league: str = Query("ALL", description="ALL or a specific league code"),
+    season: Optional[str] = Query(None),
+):
+    try:
+        token = os.getenv("REFRESH_CRON_TOKEN")
+        if token:
+            auth = request.headers.get("Authorization") or ""
+            if not auth.endswith(token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        leagues = [league] if league != "ALL" else ["PL", "BL1", "FL1", "SA", "PD"]
+        out = []
+        for lg in leagues:
+            res = fbrefdata_service.backfill(lg, season=season)
+            out.append(res.to_dict())
+        return {"success": True, "runs": out, "is_available": fbrefdata_service.is_available}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"success": False, "error": str(e), "is_available": fbrefdata_service.is_available}
+
+
+@app.post("/api/admin/fbrefdata/ingest-local")
+def api_admin_fbrefdata_ingest_local(
+    league: str = Query("PL", description="League code PL/BL1/FL1/SA/PD"),
+    season: Optional[str] = Query(None, description="Season string e.g. 2025-2026"),
+):
+    try:
+        res = fbrefdata_service.ingest_local(league=league, season=season)
+        return {"success": True, **res.to_dict()}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.get("/api/admin/weeks/distribution")

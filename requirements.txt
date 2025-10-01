@@ -25,3 +25,4 @@ httpx==0.25.2
 factory-boy==3.3.0
 soccerdata>=1.5.0
 lxml==5.2.1
+fbrefdata>=0.4.1
