@@ -1173,7 +1173,17 @@ async def get_goalkeeper_stats():
 
 @app.get("/api/betting/odds/week/{week}")
 async def get_week_betting_odds(
-    week: int, limit: int = Query(10, ge=1, le=20), league: Optional[str] = Query(None)
+    week: int,
+    limit: int = Query(10, ge=1, le=20),
+    league: Optional[str] = Query(None),
+    future_only: bool = Query(
+        True,
+        description="If true, only include matches on or after the next UTC day boundary",
+    ),
+    from_date: Optional[str] = Query(
+        None,
+        description="ISO date (YYYY-MM-DD) or datetime; when set, only include matches on/after this",
+    ),
 ):
     """Get betting odds for matches in a given game week.
     Supports multi-league via `league` query (PL default).
@@ -1198,8 +1208,49 @@ async def get_week_betting_odds(
         )
         weeks = game_week_service.organize_matches_by_week(matches)
         week_matches = weeks.get(week, [])
+        # Determine threshold: explicit from_date > next UTC day > no filter
+        from datetime import datetime, timezone, timedelta
+        threshold_dt: Optional[datetime] = None
+        if from_date:
+            try:
+                threshold_dt = datetime.fromisoformat(from_date.strip())
+                if threshold_dt.tzinfo is None:
+                    threshold_dt = threshold_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                threshold_dt = None
+        elif future_only:
+            now_utc = datetime.now(timezone.utc)
+            next_day = (now_utc + timedelta(days=1)).date()
+            threshold_dt = datetime(next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc)
+
+        def _parse_dt(m):
+            d = m.get("utc_date") or m.get("date")
+            if not d:
+                return None
+            try:
+                if isinstance(d, str):
+                    if d.endswith("Z"):
+                        return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                    return datetime.fromisoformat(d)
+                return d
+            except Exception:
+                return None
+
+        # Sort by datetime and apply threshold filter before slicing
+        def _ok_future(m) -> bool:
+            if not threshold_dt:
+                return True
+            dtm = _parse_dt(m)
+            if not dtm:
+                return False
+            if dtm.tzinfo is None:
+                dtm = dtm.replace(tzinfo=timezone.utc)
+            return dtm >= threshold_dt
+
+        week_matches_sorted = sorted(week_matches, key=lambda x: (_parse_dt(x) or datetime.max))
+        filtered = [m for m in week_matches_sorted if _ok_future(m)]
         out = []
-        for m in week_matches[:limit]:
+        for m in filtered[:limit]:
             home = (
                 m.get("home_team")
                 or m.get("homeTeam")
@@ -1278,6 +1329,11 @@ async def get_upcoming_odds(
             except Exception:
                 return None
 
+        # Define a next-day threshold for display rows (to avoid past matches when the week spans multiple dates)
+        now_dt = datetime.now(timezone.utc)
+        next_day = (now_dt + timedelta(days=1)).date()
+        threshold_dt = datetime(next_day.year, next_day.month, next_day.day, tzinfo=timezone.utc)
+
         for lg in wanted:
             try:
                 try:
@@ -1290,7 +1346,6 @@ async def get_upcoming_odds(
                     else enhanced_epl_service.get_all_matches()
                 )
                 weeks = game_week_service.organize_matches_by_week(matches)
-                now_dt = datetime.now(timezone.utc)
                 upcoming_weeks = []
                 for wnum, wmatches in weeks.items():
                     for m in wmatches:
@@ -1312,7 +1367,17 @@ async def get_upcoming_odds(
                     continue
                 week_matches = weeks.get(wk, [])
                 rows = []
-                for m in week_matches[:limit]:
+                # Sort and filter to next-day-or-later to avoid past matches within the week window
+                def _ok_future_row(m) -> bool:
+                    dtm = _parse_dt(m)
+                    if not dtm:
+                        return False
+                    if dtm.tzinfo is None:
+                        dtm = dtm.replace(tzinfo=timezone.utc)
+                    return dtm >= threshold_dt
+
+                week_sorted = sorted(week_matches, key=lambda x: (_parse_dt(x) or datetime.max))
+                for m in [mm for mm in week_sorted if _ok_future_row(mm)][:limit]:
                     home = (
                         m.get("home_team")
                         or m.get("homeTeam")
