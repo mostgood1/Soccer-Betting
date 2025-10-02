@@ -698,33 +698,46 @@ class BettingOddsService:
                         return ev
 
                     # Relaxed alias/contains match for provider quirks (e.g., 'FC Internazionale Milano' vs 'Inter')
-                    def _aliases(s: str) -> set:
-                        base = s.lower()
-                        parts = set([base])
-                        # Remove common tokens and numbers
-                        for tok in [
-                            " fc",
-                            " afc",
-                            " calcio",
-                            " ss ",
-                            " us ",
-                            " acf ",
-                            " ac ",
-                        ]:
-                            base = base.replace(tok.strip(), "")
-                        parts.add(base)
-                        parts.add(base.replace("  ", " ").strip())
-                        parts |= set(base.replace("  ", " ").strip().split())
-                        return {p for p in parts if p}
+                    def _tokenize(name: str) -> set:
+                        # Normalize and split into meaningful tokens
+                        import re
 
-                    H = _aliases(h)
-                    A = _aliases(a)
-                    th = home.lower()
-                    ta = away.lower()
-                    if (th in H or any(th in p or p in th for p in H)) and (
-                        ta in A or any(ta in p or p in ta for p in A)
-                    ):
-                        return ev
+                        s = name.lower()
+                        s = s.replace("&", " and ")
+                        # remove punctuation
+                        s = re.sub(r"[^a-z0-9\s]", " ", s)
+                        # collapse whitespace
+                        s = re.sub(r"\s+", " ", s).strip()
+                        tokens = [t for t in s.split(" ") if t]
+                        # filter out generic/non-distinct tokens
+                        stop = {
+                            "fc",
+                            "cf",
+                            "afc",
+                            "the",
+                            "club",
+                            "football",
+                            "calcio",
+                            "ss",
+                            "us",
+                            "acf",
+                            "ac",
+                        }
+                        return {t for t in tokens if t not in stop}
+
+                    th_tokens = _tokenize(home)
+                    ta_tokens = _tokenize(away)
+                    eh_tokens = _tokenize(h)
+                    ea_tokens = _tokenize(a)
+
+                    # Require that target tokens are a subset of provider tokens for BOTH teams
+                    # This avoids ambiguous matches like Manchester City vs Manchester United sharing only 'manchester'.
+                    if th_tokens and ta_tokens:
+                        if th_tokens.issubset(eh_tokens) and ta_tokens.issubset(ea_tokens):
+                            return ev
+                        # Also try swapped sides in case provider flipped home/away labels
+                        if th_tokens.issubset(ea_tokens) and ta_tokens.issubset(eh_tokens):
+                            return ev
         return None
 
     def _prob_to_decimal(self, prob: Optional[float]) -> Optional[float]:

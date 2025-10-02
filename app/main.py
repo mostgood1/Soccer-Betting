@@ -1334,7 +1334,97 @@ async def get_week_betting_odds(
         # If everything got filtered out (e.g., past week), fall back to full week
         if threshold_dt and not filtered and week_matches_sorted:
             filtered = list(week_matches_sorted)
+        # Lazy import for fallback to CSV historics
+        from .services.odds_csv_store import load_h2h_index_from_csv as _load_h2h_idx
+        from .services.team_name_normalizer import normalize_team_name as _norm
+
+        def _american_from_decimal(dec: float) -> int:
+            try:
+                return betting_odds_service._decimal_to_american(dec)  # type: ignore[attr-defined]
+            except Exception:
+                # Fallback conversion
+                if dec is None:
+                    return None  # type: ignore[return-value]
+                if dec >= 2:
+                    return int(round((dec - 1) * 100))
+                else:
+                    try:
+                        return -int(round(100 / (dec - 1)))
+                    except Exception:
+                        return None  # type: ignore[return-value]
+
+        def _build_from_csv(idx: dict, lg: str, dt: Optional[str], home: str, away: str) -> Optional[dict]:
+            if not idx:
+                return None
+            date_key = None
+            if isinstance(dt, str) and "T" in dt:
+                date_key = dt.split("T")[0]
+            # Try multiple key variants for robustness
+            cand_keys = []
+            hn = _norm(home) or home
+            an = _norm(away) or away
+            if date_key:
+                cand_keys.append(f"{date_key}|{hn.lower()}|{an.lower()}")
+                cand_keys.append(f"{date_key}|{home.lower()}|{away.lower()}")
+            cand_keys.append(f"{hn.lower()}|{an.lower()}")
+            cand_keys.append(f"{home.lower()}|{away.lower()}")
+            rec = None
+            for k in cand_keys:
+                if k in idx:
+                    rec = idx[k]
+                    break
+            if not rec:
+                return None
+            cons = rec.get("consensus_implied") or {}
+            prefs = rec.get("preferred_decimals") or {}
+            # Derive decimals, prefer preferred_bookmaker decimals; else 1/p
+            def _dec_for(tag: str) -> Optional[float]:
+                d = prefs.get(tag)
+                if isinstance(d, (int, float)) and d > 1.0:
+                    return float(d)
+                p = cons.get(tag)
+                try:
+                    if p and p > 0:
+                        return round(1.0 / float(p), 2)
+                except Exception:
+                    return None
+                return None
+            dh = _dec_for("H")
+            dd = _dec_for("D")
+            da = _dec_for("A")
+            # If nothing to show, skip
+            if not any([dh, dd, da]):
+                return None
+            return {
+                "provider": "csv-historic",
+                "timestamp": datetime.now().isoformat(),
+                "market_odds": {
+                    "match_winner": {
+                        "home": {
+                            "team": hn,
+                            "odds": dh,
+                            "odds_american": _american_from_decimal(dh) if dh else None,
+                            "probability": cons.get("H"),
+                        },
+                        "draw": {
+                            "odds": dd,
+                            "odds_american": _american_from_decimal(dd) if dd else None,
+                            "probability": cons.get("D"),
+                        },
+                        "away": {
+                            "team": an,
+                            "odds": da,
+                            "odds_american": _american_from_decimal(da) if da else None,
+                            "probability": cons.get("A"),
+                        },
+                    }
+                },
+                "overround": rec.get("consensus_overround"),
+            }
+
         out = []
+        # Preload CSV index once per request for fallback, if needed
+        h2h_idx = _load_h2h_idx((league or "PL").upper(), days=180)
         for m in filtered[:limit]:
             home = (
                 m.get("home_team")
@@ -1350,6 +1440,76 @@ async def get_week_betting_odds(
             if not (home and away):
                 continue
             odds = betting_odds_service.get_match_odds(home, away, dt)
+            if not odds or not odds.get("market_odds"):
+                # Fallback: synthesize odds from CSV historics for past or missing markets
+                try:
+                    csv_odds = _build_from_csv(h2h_idx, (league or "PL").upper(), dt, home, away)
+                except Exception:
+                    csv_odds = None
+                if csv_odds:
+                    odds = csv_odds
+            if not odds or not odds.get("market_odds"):
+                # Second fallback: use week closing snapshot odds if available for this week
+                try:
+                    from .services.week_snapshot_service import WeekSnapshotService as _WSS
+                    from .services.team_name_normalizer import normalize_team_name as _norm2
+                    ws = _WSS()
+                    snap = ws.load_closing(int(week))
+                    if snap and isinstance(snap.get("rows"), list):
+                        hn = _norm2(home) or home
+                        an = _norm2(away) or away
+                        match_row = None
+                        for r in snap["rows"]:
+                            rh = _norm2(r.get("home_team")) or r.get("home_team")
+                            ra = _norm2(r.get("away_team")) or r.get("away_team")
+                            if rh and ra and rh.lower() == hn.lower() and ra.lower() == an.lower():
+                                match_row = r
+                                break
+                        if match_row:
+                            mr = match_row.get("market_raw") or {}
+                            mp = match_row.get("market_probs") or {}
+                            dh = mr.get("home_odds")
+                            dd = mr.get("draw_odds")
+                            da = mr.get("away_odds")
+                            # If decimals missing, derive from probs
+                            def _d_from_p(p):
+                                try:
+                                    return round(1.0/float(p), 2) if p and p>0 else None
+                                except Exception:
+                                    return None
+                            if not any([dh, dd, da]) and mp:
+                                dh = _d_from_p(mp.get("H"))
+                                dd = _d_from_p(mp.get("D"))
+                                da = _d_from_p(mp.get("A"))
+                            if any([dh, dd, da]):
+                                odds = {
+                                    "provider": "closing-snapshot",
+                                    "timestamp": datetime.now().isoformat(),
+                                    "market_odds": {
+                                        "match_winner": {
+                                            "home": {
+                                                "team": hn,
+                                                "odds": dh,
+                                                "odds_american": _american_from_decimal(dh) if dh else None,
+                                                "probability": mp.get("H") if mp else None,
+                                            },
+                                            "draw": {
+                                                "odds": dd,
+                                                "odds_american": _american_from_decimal(dd) if dd else None,
+                                                "probability": mp.get("D") if mp else None,
+                                            },
+                                            "away": {
+                                                "team": an,
+                                                "odds": da,
+                                                "odds_american": _american_from_decimal(da) if da else None,
+                                                "probability": mp.get("A") if mp else None,
+                                            },
+                                        }
+                                    },
+                                    "overround": None,
+                                }
+                except Exception:
+                    pass
             out.append({"home_team": home, "away_team": away, "date": dt, "odds": odds})
         payload = {
             "week": week,
@@ -1523,6 +1683,20 @@ def api_admin_odds_cache_clear():
         raise HTTPException(status_code=500, detail=f"Failed to clear odds cache: {e}")
 
 
+@app.post("/api/admin/week-odds-cache/clear")
+def api_admin_week_odds_cache_clear():
+    """Clear the in-memory week odds TTL cache used by /api/betting/odds/week/{week}.
+    This is helpful after updating CSV snapshots or closing snapshots so changes reflect immediately.
+    """
+    try:
+        global _WEEK_ODDS_CACHE
+        cleared = len(_WEEK_ODDS_CACHE)
+        _WEEK_ODDS_CACHE = {}
+        return {"success": True, "cleared": cleared}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear week odds cache: {e}")
+
+
 @app.post("/api/admin/odds/prefetch")
 def api_admin_odds_prefetch(
     sport_key: Optional[str] = Query(
@@ -1538,10 +1712,42 @@ def api_admin_odds_prefetch(
 
 
 @app.post("/api/admin/odds/prefetch-bovada")
-def api_admin_odds_prefetch_bovada():
-    """Prefetch Bovada snapshots for supported leagues (primary provider), including H2H and derivative markets where available."""
+def api_admin_odds_prefetch_bovada(
+    lookback_hours: Optional[int] = Query(
+        None, description="Temporarily override BOVADA_LOOKBACK_HOURS for this call"
+    ),
+    window_days: Optional[int] = Query(
+        None, description="Temporarily override BOVADA_WINDOW_DAYS for this call"
+    ),
+):
+    """Prefetch Bovada snapshots for supported leagues (primary provider), including H2H and derivative markets where available.
+
+    Optional overrides allow expanding the backfill window to include recent past events for reconciliation.
+    """
     try:
+        # Temporarily override env if provided
+        old_lb = os.getenv("BOVADA_LOOKBACK_HOURS")
+        old_wd = os.getenv("BOVADA_WINDOW_DAYS")
+        try:
+            if lookback_hours is not None:
+                os.environ["BOVADA_LOOKBACK_HOURS"] = str(int(lookback_hours))
+            if window_days is not None:
+                os.environ["BOVADA_WINDOW_DAYS"] = str(int(window_days))
+        except Exception:
+            pass
         res = betting_odds_service.prefetch_bovada()
+        # Restore
+        try:
+            if old_lb is None:
+                os.environ.pop("BOVADA_LOOKBACK_HOURS", None)
+            else:
+                os.environ["BOVADA_LOOKBACK_HOURS"] = old_lb
+            if old_wd is None:
+                os.environ.pop("BOVADA_WINDOW_DAYS", None)
+            else:
+                os.environ["BOVADA_WINDOW_DAYS"] = old_wd
+        except Exception:
+            pass
         return {"success": True, "result": res}
     except Exception as e:
         raise HTTPException(
@@ -2430,11 +2636,37 @@ def api_cron_refresh_bovada(
     authorization: Optional[str] = Header(
         None, description="Authorization: Bearer <token> header (optional)"
     ),
+    lookback_hours: Optional[int] = Query(
+        None, description="Temporarily override BOVADA_LOOKBACK_HOURS for this call"
+    ),
+    window_days: Optional[int] = Query(
+        None, description="Temporarily override BOVADA_WINDOW_DAYS for this call"
+    ),
 ):
     if not _cron_token_ok(token, authorization):
         raise HTTPException(status_code=401, detail="Unauthorized")
     try:
+        old_lb = os.getenv("BOVADA_LOOKBACK_HOURS")
+        old_wd = os.getenv("BOVADA_WINDOW_DAYS")
+        try:
+            if lookback_hours is not None:
+                os.environ["BOVADA_LOOKBACK_HOURS"] = str(int(lookback_hours))
+            if window_days is not None:
+                os.environ["BOVADA_WINDOW_DAYS"] = str(int(window_days))
+        except Exception:
+            pass
         res = betting_odds_service.prefetch_bovada()
+        try:
+            if old_lb is None:
+                os.environ.pop("BOVADA_LOOKBACK_HOURS", None)
+            else:
+                os.environ["BOVADA_LOOKBACK_HOURS"] = old_lb
+            if old_wd is None:
+                os.environ.pop("BOVADA_WINDOW_DAYS", None)
+            else:
+                os.environ["BOVADA_WINDOW_DAYS"] = old_wd
+        except Exception:
+            pass
         _write_cron_status("refresh-bovada", {"result": res})
         return {"success": True, **res}
     except Exception as e:
@@ -3415,29 +3647,45 @@ async def get_game_weeks(
                     ws["lock_info"] = None
             week_summaries[week_num] = ws
 
-        # Determine current week as the first week with any unplayed (not finished) matches for this league
+        # Determine current week: prefer the first week that has any upcoming-by-date matches.
+        # This avoids defaulting to a past week whose matches remain wrongly marked as "SCHEDULED" in stale data.
         current_week_default = game_week_service.get_current_game_week()
         current_week_league = None
         try:
+            from datetime import datetime, timezone
+
+            def _parse_dt(m):
+                d = m.get("utc_date") or m.get("date")
+                if not d:
+                    return None
+                try:
+                    if isinstance(d, str):
+                        if d.endswith("Z"):
+                            return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                        return datetime.fromisoformat(d)
+                    return d
+                except Exception:
+                    return None
+
+            now_utc = datetime.now(timezone.utc)
             for wk in sorted(weeks_data.keys()):
                 wmatches = weeks_data.get(wk, [])
-                # Unplayed = not completed (includes scheduled/timed/live)
-                has_unplayed = any(
-                    not (
-                        m.get("is_completed")
-                        or (m.get("status") in ["FINISHED", "COMPLETED"])
-                    )
-                    for m in wmatches
-                )
-                if has_unplayed:
+                has_upcoming_by_time = False
+                for m in wmatches:
+                    dtm = _parse_dt(m)
+                    if dtm is None:
+                        continue
+                    if dtm.tzinfo is None:
+                        dtm = dtm.replace(tzinfo=timezone.utc)
+                    if dtm >= now_utc:
+                        has_upcoming_by_time = True
+                        break
+                if has_upcoming_by_time:
                     current_week_league = wk
                     break
             if current_week_league is None:
-                # Fallback to last available week if season fully completed for data we have
-                if weeks_data:
-                    current_week_league = max(weeks_data.keys())
-                else:
-                    current_week_league = current_week_default
+                # If no future matches remain, pick the last available week.
+                current_week_league = max(weeks_data.keys()) if weeks_data else current_week_default
         except Exception:
             current_week_league = current_week_default
 
@@ -3477,25 +3725,40 @@ async def get_current_week(
             else enhanced_epl_service.get_all_matches()
         )
         weeks_data = game_week_service.organize_matches_by_week(matches)
+        from datetime import datetime, timezone
+
+        def _parse_dt(m):
+            d = m.get("utc_date") or m.get("date")
+            if not d:
+                return None
+            try:
+                if isinstance(d, str):
+                    if d.endswith("Z"):
+                        return datetime.fromisoformat(d.replace("Z", "+00:00"))
+                    return datetime.fromisoformat(d)
+                return d
+            except Exception:
+                return None
+
+        now_utc = datetime.now(timezone.utc)
         chosen = None
         for wk in sorted(weeks_data.keys()):
             wmatches = weeks_data.get(wk, [])
-            has_unplayed = any(
-                not (
-                    m.get("is_completed")
-                    or (m.get("status") in ["FINISHED", "COMPLETED"])
-                )
-                for m in wmatches
-            )
-            if has_unplayed:
+            has_upcoming_by_time = False
+            for m in wmatches:
+                dtm = _parse_dt(m)
+                if dtm is None:
+                    continue
+                if dtm.tzinfo is None:
+                    dtm = dtm.replace(tzinfo=timezone.utc)
+                if dtm >= now_utc:
+                    has_upcoming_by_time = True
+                    break
+            if has_upcoming_by_time:
                 chosen = wk
                 break
         if chosen is None:
-            chosen = (
-                max(weeks_data.keys())
-                if weeks_data
-                else game_week_service.get_current_game_week()
-            )
+            chosen = max(weeks_data.keys()) if weeks_data else game_week_service.get_current_game_week()
         return await get_game_week_details(int(chosen), league=league)
     except Exception:
         # Fallback to calendar-based current week

@@ -48,27 +48,65 @@ class EnhancedEPLService:
             print(f"Football-Data.org: {fixtures_count} fixtures loaded")
 
     def _load_football_data(self) -> Dict:
-        """Load cached Football-Data.org data.
-        Prefer the standard data file under repo (/app/data), but if a persistent
-        volume is mounted and the file is absent (common on first boot), fallback
-        to a baked copy at /app/baked created by the Dockerfile.
+        """Load cached Football-Data.org data for EPL.
+        Robust strategy:
+        - Try both long-form (football_data_epl_2025_2026.json) and PL-specific
+          (football_data_PL_2025_2026.json) files.
+        - Prefer the one with more converted fixtures or higher currentMatchday.
+        - Look in data/ first (Render persistent volume), then fall back to /app/baked.
         """
-        primary_file = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "..",
-            "data",
-            "football_data_epl_2025_2026.json",
+        base_data_dir = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "data")
         )
-        fallback_file = "/app/baked/football_data_epl_2025_2026.json"
-        try:
-            path = primary_file if os.path.exists(primary_file) else fallback_file
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load Football-Data.org cache: {e}")
-        return {}
+        candidates = [
+            os.path.join(base_data_dir, "football_data_epl_2025_2026.json"),
+            os.path.join(base_data_dir, "football_data_PL_2025_2026.json"),
+            "/app/baked/football_data_epl_2025_2026.json",
+            "/app/baked/football_data_PL_2025_2026.json",
+        ]
+
+        def _read_json(p: str) -> Optional[Dict]:
+            try:
+                if os.path.exists(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to read EPL data file {p}: {e}")
+            return None
+
+        def _fixtures_count(d: Dict) -> int:
+            try:
+                return int(len((d or {}).get("converted_fixtures", []) or []))
+            except Exception:
+                return 0
+
+        def _current_md(d: Dict) -> int:
+            try:
+                comp = (d or {}).get("competition", {})
+                cur = (comp or {}).get("currentSeason", {})
+                md = cur.get("currentMatchday")
+                return int(md) if md is not None else 0
+            except Exception:
+                return 0
+
+        loaded: List[Dict] = []
+        for p in candidates:
+            dj = _read_json(p)
+            if dj:
+                loaded.append(dj)
+        if not loaded:
+            return {}
+        # Choose the best by fixtures, then by currentMatchday
+        best = loaded[0]
+        for d in loaded[1:]:
+            try:
+                if _fixtures_count(d) > _fixtures_count(best):
+                    best = d
+                elif _fixtures_count(d) == _fixtures_count(best) and _current_md(d) > _current_md(best):
+                    best = d
+            except Exception:
+                continue
+        return best
 
     def _is_cache_valid(self, key: str) -> bool:
         """Check if cached data is still valid"""
