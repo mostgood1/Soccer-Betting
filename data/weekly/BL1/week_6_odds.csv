@@ -1,10 +1,10 @@
 league,week,date,home_team,away_team,dec_H,dec_D,dec_A,imp_H,imp_D,imp_A,source
-BL1,6,2025-10-03,TSG 1899 Hoffenheim,1. FC Köln,,,,,,,missing
+BL1,6,2025-10-03,TSG 1899 Hoffenheim,1. FC Köln,2.0,4.11,3.9,0.500768,0.243047,0.256185,csv-historic
 BL1,6,2025-10-04,Bayer 04 Leverkusen,Union Berlin,,,,,,,missing
 BL1,6,2025-10-04,Borussia Dortmund,RB Leipzig,,,,,,,csv-historic
-BL1,6,2025-10-04,SV Werder Bremen,St Pauli,,,,,,,missing
-BL1,6,2025-10-04,FC Augsburg,VfL Wolfsburg,,,,,,,missing
+BL1,6,2025-10-04,SV Werder Bremen,St Pauli,,,,,,,csv-historic
+BL1,6,2025-10-04,FC Augsburg,VfL Wolfsburg,,,,,,,csv-historic
 BL1,6,2025-10-04,Eintracht Frankfurt,Bayern Munich,,,,,,,csv-historic
-BL1,6,2025-10-05,VfB Stuttgart,Heidenheim,1.5,5.28,6.86,0.664669,0.189545,0.145786,csv-historic
-BL1,6,2025-10-05,Hamburger SV,FSV Mainz,,,,,,,missing
-BL1,6,2025-10-05,Borussia Mönchengladbach,SC Freiburg,,,,,,,missing
+BL1,6,2025-10-05,VfB Stuttgart,Heidenheim,,,,,,,csv-historic
+BL1,6,2025-10-05,Hamburger SV,FSV Mainz,,,,,,,csv-historic
+BL1,6,2025-10-05,Borussia Mönchengladbach,SC Freiburg,,,,,,,csv-historic

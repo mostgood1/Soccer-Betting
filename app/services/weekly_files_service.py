@@ -349,3 +349,98 @@ def write_all_weekly(league: str, week: int, include: Optional[List[str]] = None
         res["written"]["results"] = write_weekly_results(league, week)
     res["bundle"] = build_weekly_bundle(league, week)
     return res
+
+
+def _list_weeks(league: str) -> Dict[int, List[Dict[str, Any]]]:
+    """Return mapping of week -> matches for a league."""
+    try:
+        svc = get_league_service(league)
+    except Exception:
+        svc = get_league_service("PL")
+    matches = (
+        svc.get_all_matches() if hasattr(svc, "get_all_matches") else []
+    )
+    return game_week_service.organize_matches_by_week(matches)
+
+
+def _is_week_completed(week: int, week_matches: List[Dict[str, Any]]) -> bool:
+    """Heuristic: a week is completed if all matches are completed per summary.
+
+    We reuse the week summary logic for consistency across leagues.
+    """
+    try:
+        summary = game_week_service.get_week_summary(int(week), week_matches)
+        total = int(summary.get("total_matches") or len(week_matches) or 0)
+        completed = int(summary.get("completed") or 0)
+        return total > 0 and completed >= total
+    except Exception:
+        # Fallback lightweight check
+        total = len(week_matches)
+        if total == 0:
+            return False
+        done = 0
+        for m in week_matches:
+            st = (m.get("status") or "").upper()
+            if st in ("FINISHED", "COMPLETED"):
+                done += 1
+                continue
+            hs = m.get("home_score") or m.get("homeScore")
+            as_ = m.get("away_score") or m.get("awayScore")
+            if isinstance(hs, (int, float)) and isinstance(as_, (int, float)):
+                done += 1
+        return done >= total
+
+
+def backfill_completed_weeks(
+    league: str,
+    up_to_week: Optional[int] = None,
+    include: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Generate weekly CSVs + bundle for all completed weeks for a league.
+
+    include: subset of ["odds","predictions","results"]; default = all
+    up_to_week: only process weeks <= this (if provided)
+    """
+    lg = (league or "PL").upper()
+    weeks_map = _list_weeks(lg)
+    processed: List[int] = []
+    skipped: List[int] = []
+    errors: Dict[int, str] = {}
+    for wk in sorted(weeks_map.keys()):
+        if up_to_week is not None and int(wk) > int(up_to_week):
+            continue
+        wmatches = weeks_map.get(wk, [])
+        if not _is_week_completed(wk, wmatches):
+            skipped.append(int(wk))
+            continue
+        try:
+            write_all_weekly(lg, int(wk), include=include)
+            processed.append(int(wk))
+        except Exception as e:
+            errors[int(wk)] = str(e)
+    return {
+        "league": lg,
+        "processed_weeks": processed,
+        "skipped_weeks": skipped,
+        "errors": errors,
+        "count": len(processed),
+    }
+
+
+def backfill_all_leagues(
+    leagues: Optional[List[str]] = None,
+    up_to_week: Optional[int] = None,
+    include: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Run backfill across multiple leagues (defaults to PL, BL1, FL1, SA, PD)."""
+    lg_list = [
+        s.upper()
+        for s in (leagues or ["PL", "BL1", "FL1", "SA", "PD"])
+        if s and isinstance(s, str)
+    ]
+    out: Dict[str, Any] = {"success": True, "leagues": {}, "total_processed": 0}
+    for lg in lg_list:
+        res = backfill_completed_weeks(lg, up_to_week=up_to_week, include=include)
+        out["leagues"][lg] = res
+        out["total_processed"] += int(res.get("count") or 0)
+    return out

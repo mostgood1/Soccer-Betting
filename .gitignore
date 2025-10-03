@@ -155,6 +155,10 @@ data/fbrapi/
 !data/football_data_*_2025_2026.json
 !data/football_data_epl_2025_2026.json
 
+# Allow weekly per-league artifacts (versioned for deployed site)
+!data/weekly/
+!data/weekly/**
+
 # Logs
 logs/
 *.log

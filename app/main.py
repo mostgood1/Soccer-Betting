@@ -3431,6 +3431,28 @@ def api_get_weekly_bundle(league: str, week: int):
         raise HTTPException(status_code=500, detail=f"Weekly bundle failed: {e}")
 
 
+# Backfill: generate weekly artifacts for completed weeks
+@app.post("/api/admin/weekly/backfill")
+def api_admin_weekly_backfill(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    up_to_week: Optional[int] = Query(None, ge=1, le=38),
+    include: Optional[str] = Query(None, description='Comma list subset of ["odds","predictions","results"]'),
+):
+    try:
+        from .services.weekly_files_service import backfill_completed_weeks, backfill_all_leagues
+
+        parts = [s.strip() for s in (include or "").split(",") if s.strip()] or None
+        if (league or "").upper() == "ALL" or not league:
+            res = backfill_all_leagues(up_to_week=up_to_week, include=parts)
+            return res
+        else:
+            lg = (league or "PL").upper()
+            res = backfill_completed_weeks(lg, up_to_week=up_to_week, include=parts)
+            return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Weekly backfill failed: {e}")
+
+
 # Quick path: write odds CSVs without auth (UI-triggered, local/dev convenience)
 @app.post("/api/admin/odds/snapshot-csv/quick")
 def api_admin_odds_snapshot_csv_quick(

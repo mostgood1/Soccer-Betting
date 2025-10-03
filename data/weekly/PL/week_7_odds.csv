@@ -1,11 +1,11 @@
 league,week,date,home_team,away_team,dec_H,dec_D,dec_A,imp_H,imp_D,imp_A,source
 PL,7,2025-10-03,Bournemouth,Fulham,,,,,,,csv-historic
-PL,7,2025-10-04,Leeds United,Tottenham,2.85,3.68,2.65,0.350916,0.271709,0.377374,csv-historic
-PL,7,2025-10-04,Arsenal,West Ham,1.27,7.11,13.7,0.786188,0.140737,0.072973,csv-historic
+PL,7,2025-10-04,Leeds United,Tottenham,,,,,,,csv-historic
+PL,7,2025-10-04,Arsenal,West Ham,,,,,,,csv-historic
 PL,7,2025-10-04,Manchester United,Sunderland,,,,,,,csv-historic
 PL,7,2025-10-04,Chelsea,Liverpool,,,,,,,csv-historic
 PL,7,2025-10-05,Aston Villa,Burnley,,,,,,,csv-historic
 PL,7,2025-10-05,Everton,Crystal Palace,,,,,,,csv-historic
-PL,7,2025-10-05,Newcastle,Nottm Forest,1.66,4.58,5.58,0.602222,0.218469,0.179309,csv-historic
-PL,7,2025-10-05,Wolves,Brighton,3.95,3.8,2.07,0.252945,0.263484,0.483571,csv-historic
+PL,7,2025-10-05,Newcastle,Nottm Forest,,,,,,,csv-historic
+PL,7,2025-10-05,Wolves,Brighton,,,,,,,csv-historic
 PL,7,2025-10-05,Brentford,Manchester City,,,,,,,csv-historic
