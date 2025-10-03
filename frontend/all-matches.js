@@ -374,17 +374,26 @@ class AllMatchesManager {
 
   formatLocalDateParts(isoLike) {
     try {
-      let src = isoLike;
-      // If the string looks like an ISO without timezone (naive), treat it as UTC to avoid local-time drift
-      if (typeof src === 'string' && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(src) && !(/[zZ]|[\+\-]\d{2}:?\d{2}$/.test(src))) {
-        src = src + 'Z';
+      if (!isoLike) return { date: '—', time: '—', long: '—' };
+      const str = String(isoLike);
+      const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(str);
+      const noTz = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str) && !(/[zZ]|[\+\-]\d{2}:?\d{2}$/.test(str));
+      let d;
+      if (dateOnly) {
+        const [y,m,da] = str.split('-').map(Number);
+        d = new Date(y, m-1, da, 12, 0, 0, 0); // local midday
+      } else if (noTz) {
+        d = new Date(str); // interpret as local time
+      } else {
+        d = new Date(str); // respect provided timezone
       }
-      const d = src ? new Date(src) : null;
       if (!d || isNaN(d.getTime())) return { date: '—', time: '—', long: '—' };
       const locale = (navigator && navigator.language) ? navigator.language : 'en-US';
       const dateFmt = new Intl.DateTimeFormat(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
       const timeFmt = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-      return { date: dateFmt.format(d), time: timeFmt.format(d), long: dateFmt.format(d) + ' ' + timeFmt.format(d) };
+      // For date-only, omit time; for others show both
+      const showTime = !dateOnly;
+      return { date: dateFmt.format(d), time: showTime ? timeFmt.format(d) : '—', long: showTime ? (dateFmt.format(d) + ' ' + timeFmt.format(d)) : dateFmt.format(d) };
     } catch (e) { return { date: '—', time: '—', long: '—' }; }
   }
 

@@ -32,18 +32,29 @@ class GameWeekManager {
     // Local time helpers
     formatLocalDateParts(isoLike) {
         try {
-            // Prefer explicit UTC date if provided
-            const d = isoLike ? new Date(isoLike) : null;
-            if (!d || isNaN(d.getTime())) return { date: '—', time: '—', long: '—' };
+            if (!isoLike) return { date: '—', time: '—', long: '—' };
+            const str = String(isoLike);
             const locale = (navigator && navigator.language) ? navigator.language : 'en-US';
-            const dateFmt = new Intl.DateTimeFormat(locale, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+            const dateFmtShort = new Intl.DateTimeFormat(locale, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+            const dateFmtLong = new Intl.DateTimeFormat(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
             const timeFmt = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' });
-            const longFmt = new Intl.DateTimeFormat(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
-            return {
-                date: dateFmt.format(d),
-                time: timeFmt.format(d),
-                long: longFmt.format(d)
-            };
+            const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(str);
+            const noTz = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str) && !(/[zZ]|[\+\-]\d{2}:?\d{2}$/.test(str));
+            let d;
+            if (dateOnly) {
+                // Treat as local calendar day; synthesize midday to avoid DST edge cases
+                const [y,m,da] = str.split('-').map(Number);
+                d = new Date(y, m-1, da, 12, 0, 0, 0);
+                return { date: dateFmtShort.format(d), time: '—', long: dateFmtLong.format(d) };
+            } else if (noTz) {
+                // Treat timezone-less datetime as local time
+                d = new Date(str.replace('Z',''));
+            } else {
+                // Respect provided timezone (UTC or offset)
+                d = new Date(str);
+            }
+            if (!d || isNaN(d.getTime())) return { date: '—', time: '—', long: '—' };
+            return { date: dateFmtShort.format(d), time: timeFmt.format(d), long: dateFmtLong.format(d) + ' ' + timeFmt.format(d) };
         } catch (e) {
             return { date: '—', time: '—', long: '—' };
         }
