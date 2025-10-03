@@ -89,8 +89,8 @@ class FBRApiService:
             "PL": "ENG",  # England
             "BL1": "GER",  # Germany
             "FL1": "FRA",  # France
-            "SA": "ITA",   # Italy
-            "PD": "ESP",   # Spain
+            "SA": "ITA",  # Italy
+            "PD": "ESP",  # Spain
         }.get(code, "ENG")
 
     def _league_name_targets(self, code: str) -> List[str]:
@@ -153,9 +153,13 @@ class FBRApiService:
         return out
 
     # --- Public: backfill schedule ---
-    def backfill_schedule(self, league: str, season: Optional[str] = None) -> BackfillResult:
+    def backfill_schedule(
+        self, league: str, season: Optional[str] = None
+    ) -> BackfillResult:
         season_str = season or _season_string_for_today()
-        res = BackfillResult(league=league.upper(), season=season_str, artifacts=[], notes=[])
+        res = BackfillResult(
+            league=league.upper(), season=season_str, artifacts=[], notes=[]
+        )
 
         api_key = self._get_api_key()
         if not api_key:
@@ -183,8 +187,16 @@ class FBRApiService:
                 # League match data format
                 date = m.get("date") or m.get("utcDate") or m.get("commence_time")
                 time_str = m.get("time") or ""
-                home = m.get("home") or m.get("home_team") or (m.get("homeTeam") or {}).get("name")
-                away = m.get("away") or m.get("away_team") or (m.get("awayTeam") or {}).get("name")
+                home = (
+                    m.get("home")
+                    or m.get("home_team")
+                    or (m.get("homeTeam") or {}).get("name")
+                )
+                away = (
+                    m.get("away")
+                    or m.get("away_team")
+                    or (m.get("awayTeam") or {}).get("name")
+                )
                 if not (date and home and away):
                     continue
                 # Compose iso datetime when both date and time present

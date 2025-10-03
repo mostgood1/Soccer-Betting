@@ -112,6 +112,109 @@ class GoalsMarketStore:
             elif ext == ".json":
                 self.load_json(p)
 
+    def load_odds_history_totals(self, base_dir: Optional[str] = None) -> int:
+        """Load totals from data/odds_history/totals_{LEAGUE}.csv files.
+
+        These CSVs are written by snapshot endpoints (from Bovada and/or The Odds API) and
+        contain rows per outcome (over/under). We aggregate per (date,home,away,line)
+        to form a single record with over_odds and under_odds when both present.
+        Returns the number of totals entries added.
+        """
+        try:
+            base_dir = base_dir or os.path.join(_repo_root(), "data", "odds_history")
+            if not os.path.isdir(base_dir):
+                return 0
+            import csv as _csv
+            from collections import defaultdict
+
+            grouped: Dict[Tuple[str, str, str, float], Dict[str, Any]] = defaultdict(
+                dict
+            )
+            for name in os.listdir(base_dir):
+                if not name.startswith("totals_") or not name.endswith(".csv"):
+                    continue
+                path = os.path.join(base_dir, name)
+                try:
+                    with open(path, "r", encoding="utf-8", newline="") as f:
+                        r = _csv.DictReader(f)
+                        for row in r:
+                            # Expect columns: match_date, home_team, away_team, market, outcome, line, decimal_odds, ...
+                            if (row.get("market") or "").lower() != "totals":
+                                continue
+                            outcome = (row.get("outcome") or "").lower()
+                            if outcome not in ("over", "under"):
+                                continue
+                            date = _only_date(
+                                row.get("match_date") or row.get("commence_time")
+                            )
+                            home = normalize_team_name(
+                                row.get("home_team") or row.get("home")
+                            )
+                            away = normalize_team_name(
+                                row.get("away_team") or row.get("away")
+                            )
+                            try:
+                                line = (
+                                    float(row.get("line")) if row.get("line") else None
+                                )
+                            except Exception:
+                                line = None
+                            if not (date and home and away and isinstance(line, float)):
+                                continue
+                            try:
+                                dec = (
+                                    float(row.get("decimal_odds"))
+                                    if row.get("decimal_odds")
+                                    else None
+                                )
+                            except Exception:
+                                dec = None
+                            # If decimal missing, try implied_prob -> convert to decimal
+                            if dec is None:
+                                try:
+                                    ip = (
+                                        float(row.get("implied_prob"))
+                                        if row.get("implied_prob")
+                                        else None
+                                    )
+                                    if ip and ip > 0:
+                                        dec = round(1.0 / ip, 4)
+                                except Exception:
+                                    dec = None
+                            key = (date, home, away, line)
+                            g = grouped[key]
+                            if outcome == "over" and dec:
+                                g["over_odds"] = dec
+                            elif outcome == "under" and dec:
+                                g["under_odds"] = dec
+                            # stash last bookmaker for reference
+                            if row.get("bookmaker"):
+                                g["bookmaker"] = (row.get("bookmaker") or "").strip()
+                except Exception:
+                    continue
+            added = 0
+            for (date, home, away, line), vals in grouped.items():
+                over = vals.get("over_odds")
+                under = vals.get("under_odds")
+                if not (
+                    isinstance(over, (int, float)) and isinstance(under, (int, float))
+                ):
+                    continue
+                rec = GoalsMarketRecord(
+                    date=date,
+                    home=home or "",
+                    away=away or "",
+                    line=float(line),
+                    over_odds=float(over),
+                    under_odds=float(under),
+                    bookmaker=vals.get("bookmaker"),
+                )
+                self._add(rec)
+                added += 1
+            return added
+        except Exception:
+            return 0
+
     def _ingest_row(self, row: Dict[str, Any]) -> None:
         try:
             date = _only_date(
@@ -179,6 +282,11 @@ def _default_candidate_paths() -> Iterable[str]:
 def load_default() -> GoalsMarketStore:
     store = GoalsMarketStore()
     store.load_paths(_default_candidate_paths())
+    # Also hydrate from odds_history totals CSVs to support expanded markets from snapshots
+    try:
+        store.load_odds_history_totals()
+    except Exception:
+        pass
     return store
 
 

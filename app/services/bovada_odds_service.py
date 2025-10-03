@@ -19,7 +19,7 @@ Notes:
 """
 from __future__ import annotations
 from typing import Dict, Any, List, Optional, Tuple
-import os, time
+import os, time, re
 
 try:
     import requests  # type: ignore
@@ -164,6 +164,36 @@ def _fetch_bovada_coupon(
                     yield payload
 
         def parse_event(ev: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            def _parse_handicap(val: Any) -> Optional[float]:
+                """Parse Bovada handicap/point strings into a numeric value.
+                Supports split Asian lines like '2, 2.5' or '3 / 3.5' by mapping to the quarter-line midpoint (e.g., 2.25, 3.25).
+                """
+                if val is None:
+                    return None
+                # Already numeric
+                if isinstance(val, (int, float)):
+                    try:
+                        return float(val)
+                    except Exception:
+                        return None
+                # Strings like '2.5', '2, 2.5', '2 / 2.5', possibly with spaces
+                if isinstance(val, str):
+                    s = val.strip()
+                    # Normalize separators and spaces
+                    s_norm = s.replace(" ", "")
+                    # Extract numbers present (supports negatives and decimals)
+                    nums = re.findall(r"-?\d+(?:\.\d+)?", s_norm)
+                    try:
+                        if len(nums) == 1:
+                            return float(nums[0])
+                        if len(nums) >= 2:
+                            a = float(nums[0])
+                            b = float(nums[1])
+                            # Quarter line midpoint (e.g., 2 and 2.5 -> 2.25)
+                            return round((a + b) / 2.0, 2)
+                    except Exception:
+                        return None
+                return None
             # Teams
             comps = ev.get("competitors") or []
             home_name = None
@@ -338,11 +368,9 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            try:
-                                if hcap is not None:
-                                    line_val = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
+                            if ln is not None:
+                                line_val = ln
                             if "over" in oname:
                                 over_imp = imp
                                 over_ml = (
@@ -530,11 +558,9 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            try:
-                                if hcap is not None:
-                                    c_line_val = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
+                            if ln is not None:
+                                c_line_val = ln
                             if "over" in oname:
                                 c_over_imp = imp
                                 c_over_ml = (
@@ -590,11 +616,9 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            try:
-                                if hcap is not None:
-                                    k_line_val = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
+                            if ln is not None:
+                                k_line_val = ln
                             if "over" in oname:
                                 k_over_imp = imp
                                 k_over_ml = (
@@ -648,12 +672,7 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            ln = None
-                            try:
-                                if hcap is not None:
-                                    ln = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
                             name_norm = _normalize_team(oname)
                             if (
                                 home_name
@@ -715,12 +734,7 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            ln = None
-                            try:
-                                if hcap is not None:
-                                    ln = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
                             name_norm = _normalize_team(oname)
                             if (
                                 home_name
@@ -792,11 +806,9 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            try:
-                                if hcap is not None:
-                                    line_val = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
+                            if ln is not None:
+                                line_val = ln
                             if "over" in oname:
                                 over_imp = imp
                                 over_ml = (
@@ -858,11 +870,9 @@ def _fetch_bovada_coupon(
                                 or mk.get("handicap")
                                 or o.get("handicap")
                             )
-                            try:
-                                if hcap is not None:
-                                    line_val = float(hcap)
-                            except Exception:
-                                pass
+                            ln = _parse_handicap(hcap)
+                            if ln is not None:
+                                line_val = ln
                             if "over" in oname:
                                 over_imp = imp
                                 over_ml = (
@@ -938,11 +948,9 @@ def _fetch_bovada_coupon(
                                     or mk.get("handicap")
                                     or o.get("handicap")
                                 )
-                                try:
-                                    if hcap is not None:
-                                        line_val = float(hcap)
-                                except Exception:
-                                    pass
+                                ln = _parse_handicap(hcap)
+                                if ln is not None:
+                                    line_val = ln
                                 if "over" in oname:
                                     over_imp = imp
                                     over_ml = (
@@ -1017,11 +1025,9 @@ def _fetch_bovada_coupon(
                                     or mk.get("handicap")
                                     or o.get("handicap")
                                 )
-                                try:
-                                    if hcap is not None:
-                                        line_val = float(hcap)
-                                except Exception:
-                                    pass
+                                ln = _parse_handicap(hcap)
+                                if ln is not None:
+                                    line_val = ln
                                 if "over" in oname:
                                     over_imp = imp
                                     over_ml = (

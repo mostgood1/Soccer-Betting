@@ -34,9 +34,9 @@ Start the entire EPL Betting Platform with one command:
 
 ## Access Points
 
-- **Main App**: http://127.0.0.1:8000
-- **API Docs**: http://127.0.0.1:8000/docs  
-- **Game Weeks**: http://127.0.0.1:8000/#game-weeks
+- **Main App**: http://127.0.0.1:8040
+- **API Docs**: http://127.0.0.1:8040/docs  
+- **Game Weeks**: http://127.0.0.1:8040/#game-weeks
 
 ## Features
 

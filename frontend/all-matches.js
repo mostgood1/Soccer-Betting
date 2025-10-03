@@ -5,6 +5,7 @@ class AllMatchesManager {
     this.groups = [];
     this.brandingAll = {};
     this.oddsByLeagueWeek = {}; // { `${league}-${week}`: [ {home_team, away_team, odds} ] }
+    this.predsByLeagueWeek = {}; // { `${league}-${week}`: [ {home_team, away_team, predictions} ] }
     try {
       const url = new URL(window.location.href);
       this.filterLeague = url.searchParams.get('league') || 'ALL';
@@ -44,6 +45,10 @@ class AllMatchesManager {
         try { this.render(); } catch (_) {}
       })
       .catch(() => {/* ignore odds failures for initial UX */});
+    // Kick off predictions fetch (compact) and re-render when available
+    this.loadBatchPredictions()
+      .then(() => { try { this.render(); } catch (_) {} })
+      .catch(() => {/* ignore */});
   }
 
   async loadBrandingAll() {
@@ -67,7 +72,11 @@ class AllMatchesManager {
   // Show completed games from the same day as well (like NHL view)
   qs.push(`include_completed=true`);
       const url = `${this.apiBaseUrl}/api/games/by-date?${qs.join('&')}`;
-      const resp = await fetch(url);
+      // Guard against slow API: add a 10s timeout
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(t);
       if (!resp.ok) throw new Error(`by-date fetch failed (${resp.status})`);
       const data = await resp.json();
       let groups = Array.isArray(data.groups) ? data.groups : [];
@@ -96,7 +105,62 @@ class AllMatchesManager {
       this.groups = groups;
     } catch (e) {
       console.warn('by-date groups unavailable', e);
+      // Try a per-league fallback to avoid a single slow league blocking the page
+      try {
+        const leagues = this.filterLeague && this.filterLeague !== 'ALL' ? [this.filterLeague] : ['PL','BL1','FL1','SA','PD'];
+        const perGroups = await this.loadGroupsPerLeague(leagues);
+        if (perGroups && perGroups.length) {
+          this.groups = perGroups;
+          return;
+        }
+      } catch (e2) {
+        console.warn('per-league fallback failed', e2);
+      }
+      // Final fallback: show a banner so the UI isn’t stuck
       this.groups = [];
+      this.fallbackInfo = { type: 'error', message: 'API timeout or unavailable' };
+    }
+  }
+
+  async loadGroupsPerLeague(leagues) {
+    // Fetch per-league by-date concurrently with short timeouts and merge by date
+    const results = await Promise.allSettled(leagues.map(lg => this._fetchGroupsForLeague(lg)));
+    const merged = {};
+    for (const r of results) {
+      if (r.status !== 'fulfilled' || !r.value) continue;
+      for (const g of r.value) {
+        const key = g.date;
+        const list = merged[key] || [];
+        merged[key] = list.concat(g.matches || []);
+      }
+    }
+    const out = Object.keys(merged).sort().map(d => ({ date: d, matches: merged[d] }));
+    // Apply onlyToday filter
+    if (this.onlyToday && out.length) {
+      const todayUtc = new Date().toISOString().slice(0,10);
+      return out.filter(g => (g.date || '').slice(0,10) === todayUtc);
+    }
+    return out;
+  }
+
+  async _fetchGroupsForLeague(league) {
+    try {
+      const qs = [
+        `leagues=${encodeURIComponent(league)}`,
+        `days_ahead=${encodeURIComponent(this.daysAhead)}`,
+        `days_back=${encodeURIComponent(this.daysBack)}`,
+        `include_completed=true`
+      ];
+      const url = `${this.apiBaseUrl}/api/games/by-date?${qs.join('&')}`;
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 8000);
+      const resp = await fetch(url, { signal: controller.signal });
+      clearTimeout(t);
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return Array.isArray(data.groups) ? data.groups : [];
+    } catch {
+      return [];
     }
   }
 
@@ -116,17 +180,44 @@ class AllMatchesManager {
     await Promise.allSettled(requests);
   }
 
+  async loadBatchPredictions() {
+    const reqs = [];
+    const seen = new Set();
+    for (const g of this.groups) {
+      for (const m of g.matches || []) {
+        const key = `${m.league}-${m.game_week}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          reqs.push(this._fetchWeekPredictions(m.league, m.game_week));
+        }
+      }
+    }
+    await Promise.allSettled(reqs);
+  }
+
   async _fetchWeekOdds(league, week) {
     try {
       // Add a fetch timeout to avoid hanging the UI if providers are slow
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 10000);
-      const resp = await fetch(
-        `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=20&league=${encodeURIComponent(league)}`,
+      // Prefer live provider calls here so All Matches shows complete markets (Totals/BTTS/Corners)
+      // within a bounded timeout. If this fails, we retry once with cache_only=true.
+      let resp = await fetch(
+        `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=20&league=${encodeURIComponent(league)}&cache_only=false`,
         { signal: controller.signal }
       );
       clearTimeout(t);
-      if (!resp.ok) throw new Error(`week odds failed ${league}-${week}`);
+      if (!resp.ok) {
+        // Fallback to cache_only when live call is slow/unavailable
+        const controller2 = new AbortController();
+        const t2 = setTimeout(() => controller2.abort(), 8000);
+        resp = await fetch(
+          `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=20&league=${encodeURIComponent(league)}&cache_only=true`,
+          { signal: controller2.signal }
+        );
+        clearTimeout(t2);
+        if (!resp.ok) throw new Error(`week odds failed ${league}-${week}`);
+      }
       const data = await resp.json();
       this.oddsByLeagueWeek[`${league}-${week}`] = data.matches || [];
     } catch (e) {
@@ -135,8 +226,31 @@ class AllMatchesManager {
     }
   }
 
+  async _fetchWeekPredictions(league, week) {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 10000);
+      const resp = await fetch(
+        `${this.apiBaseUrl}/api/predictions/week/${encodeURIComponent(week)}?league=${encodeURIComponent(league)}&allow_on_demand=0`,
+        { signal: controller.signal }
+      );
+      clearTimeout(t);
+      if (!resp.ok) throw new Error(`week preds failed ${league}-${week}`);
+      const data = await resp.json();
+      this.predsByLeagueWeek[`${league}-${week}`] = data.matches || [];
+    } catch (e) {
+      console.warn('week predictions error', league, week, e);
+      this.predsByLeagueWeek[`${league}-${week}`] = [];
+    }
+  }
+
   getOddsRow(league, week, home, away) {
     const list = this.oddsByLeagueWeek[`${league}-${week}`] || [];
+    return list.find(r => r.home_team === home && r.away_team === away) || null;
+  }
+
+  getPredRow(league, week, home, away) {
+    const list = this.predsByLeagueWeek[`${league}-${week}`] || [];
     return list.find(r => r.home_team === home && r.away_team === away) || null;
   }
 
@@ -180,6 +294,9 @@ class AllMatchesManager {
     try {
       if (!this.fallbackInfo) return '';
       const dparts = this.formatLocalDateParts(this.fallbackInfo.date);
+      if (this.fallbackInfo.type === 'error') {
+        return `<div class="sb-info-banner">Unable to load matches right now (timeout). You can refresh or try again shortly.</div>`;
+      }
       return `<div class="sb-info-banner">No matches today — showing next match day: <strong>${dparts.date}</strong></div>`;
     } catch { return ''; }
   }
@@ -199,7 +316,8 @@ class AllMatchesManager {
     const kickoff = m.utc_date || m.date;
     const kp = this.formatLocalDateParts(kickoff);
     const oddsRow = this.getOddsRow(m.league, m.game_week, m.home_team, m.away_team);
-    const marketsHtml = this.renderMarkets(oddsRow?.odds);
+  const marketsHtml = this.renderMarkets(oddsRow?.odds);
+  const recHtml = this.renderRecommendation(m, oddsRow);
     const leagueBadge = `<span class="sb-chip"><i class="fas fa-flag"></i> ${m.league}</span>`;
     const venue = m.venue || m.stadium || '';
     return `
@@ -222,7 +340,8 @@ class AllMatchesManager {
             <span class="t-name">${m.home_team}</span>
           </div>
         </div>
-        ${marketsHtml}
+  ${recHtml}
+  ${marketsHtml}
         <div class="sb-actions">
           <a class="sb-link" href="/?league=${encodeURIComponent(m.league)}&week=${encodeURIComponent(m.game_week)}" title="Open week view">Week ${m.game_week} details</a>
         </div>
@@ -259,16 +378,94 @@ class AllMatchesManager {
         const lineTxt = (pick && pick.line != null) ? `${pick.line}` : '';
         tot = `
           <div class="sb-market-row">
-            <div class="sb-market-label">Totals ${lineTxt}</div>
+            <div class="sb-market-label">Goals O/U ${lineTxt}</div>
             <div class="sb-market-chips">
               <span class="sb-market-chip over">Over ${over}</span>
               <span class="sb-market-chip under">Under ${under}</span>
             </div>
           </div>`;
       }
-      if (!ml && !tot) return '';
-      return `<div class="sb-market-panel">${ml}${tot}</div>`;
+      // BTTS row
+      let btts = '';
+      const b = mo.both_teams_to_score || null;
+      if (b && (b.yes || b.no)) {
+        const yes = this.fmtAmerican(b.yes?.odds_american);
+        const no = this.fmtAmerican(b.no?.odds_american);
+        btts = `
+          <div class="sb-market-row">
+            <div class="sb-market-label">BTTS</div>
+            <div class="sb-market-chips">
+              <span class="sb-market-chip yes">Yes ${yes}</span>
+              <span class="sb-market-chip no">No ${no}</span>
+            </div>
+          </div>`;
+      }
+      // Corners O/U (pick nearest to 10.5)
+      let corners = '';
+      const ct = Array.isArray(mo.corners_totals) ? mo.corners_totals : [];
+      if (ct.length) {
+        const target = 10.5;
+        const withLine = ct.filter(t => typeof t.line === 'number');
+        const pick = withLine.length ? (withLine.find(t => Math.abs(t.line - target) < 1e-9) || withLine.sort((a,b)=>Math.abs(a.line-target)-Math.abs(b.line-target))[0]) : ct[0];
+        const over = this.fmtAmerican(pick?.over?.odds_american);
+        const under = this.fmtAmerican(pick?.under?.odds_american);
+        const lineTxt = (pick && pick.line != null) ? `${pick.line}` : '';
+        corners = `
+          <div class="sb-market-row">
+            <div class="sb-market-label">Corners O/U ${lineTxt}</div>
+            <div class="sb-market-chips">
+              <span class="sb-market-chip over">Over ${over}</span>
+              <span class="sb-market-chip under">Under ${under}</span>
+            </div>
+          </div>`;
+      }
+      if (!ml && !tot && !btts && !corners) return '';
+      return `<div class="sb-market-panel">${ml}${tot}${btts}${corners}</div>`;
     } catch { return ''; }
+  }
+
+  renderRecommendation(m, oddsRow) {
+    try {
+      const p = this.getPredRow(m.league, m.game_week, m.home_team, m.away_team);
+      if (!p || !p.predictions) return '';
+      const pred = p.predictions || {};
+      // Basic pick from model result prediction
+      const pick = (pred.result_prediction || '').toUpperCase();
+      const label = pick === 'H' ? (m.home_team || 'Home') : pick === 'A' ? (m.away_team || 'Away') : 'Draw';
+      // Optional: compute simple edge vs moneyline if available
+      let edgeTxt = '';
+      try {
+        const mo = oddsRow && oddsRow.odds && oddsRow.odds.market_odds ? oddsRow.odds.market_odds.match_winner : null;
+        if (mo) {
+          const ph = typeof pred.home_win_prob === 'number' ? pred.home_win_prob : null;
+          const pd = typeof pred.draw_prob === 'number' ? pred.draw_prob : null;
+          const pa = typeof pred.away_win_prob === 'number' ? pred.away_win_prob : null;
+          const imp = {
+            H: this.americanToProb(mo.home?.odds_american),
+            D: this.americanToProb(mo.draw?.odds_american),
+            A: this.americanToProb(mo.away?.odds_american)
+          };
+          const mdl = { H: ph, D: pd, A: pa };
+          const k = pick;
+          if (mdl[k] != null && imp[k] != null && isFinite(mdl[k]) && isFinite(imp[k]) && imp[k] > 0) {
+            const edge = (mdl[k] - imp[k]) * 100;
+            const sign = edge >= 0 ? '+' : '';
+            edgeTxt = ` • Edge ${sign}${edge.toFixed(1)}%`;
+          }
+        }
+      } catch {}
+      return `
+        <div class="sb-recommendation">
+          <span class="sb-chip rec"><i class="fas fa-lightbulb"></i> Pick: ${label}${edgeTxt}</span>
+        </div>`;
+    } catch { return ''; }
+  }
+
+  americanToProb(american) {
+    const n = Number(american);
+    if (!isFinite(n) || n === 0) return null;
+    if (n > 0) return 100 / (n + 100);
+    return -n / (-n + 100);
   }
 
   pickTotalsLine(totals) {

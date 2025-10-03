@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import requests
 
-BASE_URL = os.getenv("SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+BASE_URL = os.getenv("SMOKE_BASE_URL", "http://127.0.0.1:8040").rstrip("/")
 LEAGUES = os.getenv("SMOKE_LEAGUES", "PL,BL1,FL1,SA,PD").split(",")
 TIMEOUT = float(os.getenv("SMOKE_TIMEOUT", "25"))
 

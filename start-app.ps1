@@ -6,7 +6,7 @@ param(
     [switch]$quiet,
     [switch]$help,
     [switch]$noReload,
-    [int]$port = 8000
+    [int]$port = 8040
 )
 
 if ($help) {
@@ -20,7 +20,7 @@ if ($help) {
     Write-Host "  -dev     Development mode with detailed logging" -ForegroundColor Gray
     Write-Host "  -quiet   Quiet mode with minimal output" -ForegroundColor Gray
     Write-Host "  -noReload Disable Uvicorn file reload (stability)" -ForegroundColor Gray
-    Write-Host "  -port    Override default port (default 8000)" -ForegroundColor Gray
+    Write-Host "  -port    Override default port (default 8040)" -ForegroundColor Gray
     Write-Host "  -help    Show this help message" -ForegroundColor Gray
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Yellow

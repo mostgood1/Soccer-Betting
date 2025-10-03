@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Test</title>
 </head>
@@ -12,7 +13,7 @@
         async function testAPI() {
             try {
                 console.log('Testing API...');
-                const response = await fetch('http://127.0.0.1:8000/api/teams');
+                const response = await fetch('http://127.0.0.1:8040/api/teams');
                 const data = await response.json();
                 console.log('API Response:', data);
                 document.getElementById('result').innerHTML = 

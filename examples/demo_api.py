@@ -8,7 +8,7 @@ from datetime import datetime
 
 def demo_api():
     """Demonstrate the API functionality"""
-    base_url = "http://127.0.0.1:8000"
+    base_url = "http://127.0.0.1:8040"
 
     print("🏈 Soccer Betting Platform Demo")
     print("=" * 40)

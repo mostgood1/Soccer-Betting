@@ -29,6 +29,12 @@ from .bovada_odds_service import (
 )
 from .team_name_normalizer import normalize_team_name
 
+try:
+    # Optional: used to synthesize totals if Bovada markets are missing
+    from .goals_market_service import goals_market_store
+except Exception:  # pragma: no cover
+    goals_market_store = None  # type: ignore
+
 # Load environment variables
 load_dotenv()
 
@@ -152,14 +158,14 @@ class BettingOddsService:
         now = datetime.now()
         # Only keep events in the next N days for soccer; also keep a small lookback window
         try:
-            window_days = int(os.getenv("BOVADA_WINDOW_DAYS", "14"))
+            window_days = int(os.getenv("BOVADA_WINDOW_DAYS", "21"))
             if window_days < 0:
                 window_days = 14
         except Exception:
             window_days = 14
         window_end = now + timedelta(days=window_days)
         try:
-            lookback_hours = int(os.getenv("BOVADA_LOOKBACK_HOURS", "120"))
+            lookback_hours = int(os.getenv("BOVADA_LOOKBACK_HOURS", "168"))
             if lookback_hours < 0:
                 lookback_hours = 0
         except Exception:
@@ -288,9 +294,117 @@ class BettingOddsService:
                 api_odds = self._lookup_the_odds_api(home_team, away_team)
             odds = api_odds
 
+        # If we have an odds structure from non-Bovada (e.g., The Odds API), try to enrich with Bovada
+        # expanded markets (totals, halves, BTTS, etc.) using cached snapshots to avoid network calls.
+        if odds and isinstance(odds, dict):
+            try:
+                mo = odds.get("market_odds") or {}
+                has_totals = bool(mo.get("totals"))
+                if not has_totals:
+                    bev = None
+                    try:
+                        bev = self._get_bovada_event(
+                            n_home, n_away, match_date, no_fetch=True
+                        )
+                    except Exception:
+                        bev = None
+                    if bev:
+                        odds = self._merge_bovada_non_h2h(odds, bev)
+            except Exception:
+                pass
+
         # Persist minimal structure to reduce duplicate provider calls within TTL
         self._cache_odds(cache_key, odds or {})
         return odds or {}
+
+    # Public helper: attach Bovada expanded markets onto an existing odds dict if snapshots exist.
+    def attach_bovada_markets(
+        self,
+        odds: Dict[str, Any],
+        home_team: str,
+        away_team: str,
+        match_date: Optional[str] = None,
+        cache_only: bool = True,
+    ) -> Dict[str, Any]:
+        try:
+            if not isinstance(odds, dict):
+                return odds
+            mo = odds.setdefault("market_odds", {}) if isinstance(odds, dict) else {}
+            # If we already have totals, assume markets are present
+            if mo.get("totals"):
+                return odds
+            n_home = normalize_team_name(home_team) or home_team
+            n_away = normalize_team_name(away_team) or away_team
+            bev = None
+            try:
+                bev = self._get_bovada_event(
+                    n_home, n_away, match_date, no_fetch=cache_only
+                )
+            except Exception:
+                bev = None
+            if bev:
+                return self._merge_bovada_non_h2h(odds, bev)
+            # Fallback: synthesize a totals line from goals market store if available
+            try:
+                if goals_market_store is not None and match_date:
+                    # Prefer 2.5, then nearest among common lines
+                    candidates = [2.5, 3.5, 1.5]
+                    rows = []
+                    for ln in candidates:
+                        try:
+                            look = goals_market_store.lookup_total(
+                                match_date, n_home, n_away, ln
+                            )
+                        except Exception:
+                            look = None
+                        if not look:
+                            continue
+                        over_p, _book, line_used = look
+                        if (
+                            not isinstance(over_p, (int, float))
+                            or over_p <= 0
+                            or over_p >= 1
+                        ):
+                            continue
+                        under_p = 1.0 - over_p
+
+                        # Convert to synthetic decimal odds from implied probs
+                        def _p_to_dec(p: float) -> Optional[float]:
+                            try:
+                                return round(1.0 / p, 2) if p and p > 0 else None
+                            except Exception:
+                                return None
+
+                        o_dec = _p_to_dec(over_p)
+                        u_dec = _p_to_dec(under_p)
+                        rows.append(
+                            {
+                                "line": line_used,
+                                "over": {
+                                    "probability": over_p,
+                                    "odds": o_dec,
+                                    "odds_american": self._decimal_to_american(o_dec)
+                                    if o_dec
+                                    else None,
+                                },
+                                "under": {
+                                    "probability": under_p,
+                                    "odds": u_dec,
+                                    "odds_american": self._decimal_to_american(u_dec)
+                                    if u_dec
+                                    else None,
+                                },
+                            }
+                        )
+                    if rows:
+                        mo["totals"] = rows
+                        odds["market_odds"] = mo
+                        return odds
+            except Exception:
+                pass
+            return odds
+        except Exception:
+            return odds
 
     # ---------- Providers ----------
     def _lookup_the_odds_api(self, home: str, away: str) -> Optional[Dict[str, Any]]:
@@ -627,11 +741,22 @@ class BettingOddsService:
                 ):
                     # Fallback to persisted snapshot if available
                     s = _load_persisted(key)
+                # If still nothing and no_fetch is True, DO NOT perform any network calls.
+                # Strictly rely on persisted snapshots only.
                 if isinstance(s, dict) and "events" in s:
                     self._bovada_cache[key] = s
                     self._bovada_cache_expiry[key] = now_loc + timedelta(
                         seconds=self.cache_duration
                     )
+                    # Persist snapshot for cache_only consumers
+                    try:
+                        out_path = self._bovada_snap_dir / f"bovada_{key}.json"
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        payload = {"timestamp": now_loc.isoformat(), "snapshot": s}
+                        with out_path.open("w", encoding="utf-8") as fh:
+                            json.dump(payload, fh)
+                    except Exception:
+                        pass
 
         # Always keep EU available
         _ensure_or_load("EU", fetch_eu_odds)
@@ -733,12 +858,53 @@ class BettingOddsService:
                     # Require that target tokens are a subset of provider tokens for BOTH teams
                     # This avoids ambiguous matches like Manchester City vs Manchester United sharing only 'manchester'.
                     if th_tokens and ta_tokens:
-                        if th_tokens.issubset(eh_tokens) and ta_tokens.issubset(ea_tokens):
+                        if th_tokens.issubset(eh_tokens) and ta_tokens.issubset(
+                            ea_tokens
+                        ):
                             return ev
                         # Also try swapped sides in case provider flipped home/away labels
-                        if th_tokens.issubset(ea_tokens) and ta_tokens.issubset(eh_tokens):
+                        if th_tokens.issubset(ea_tokens) and ta_tokens.issubset(
+                            eh_tokens
+                        ):
                             return ev
         return None
+
+    def refresh_bovada_snapshots(self) -> Dict[str, Any]:
+        """Force-refresh and persist Bovada snapshots for all supported groups (EU, PL, BL1, FL1, SA, PD)."""
+        ok = {}
+        try:
+            now_loc = datetime.now()
+            groups = {
+                "EU": fetch_eu_odds,
+                "PL": fetch_pl_odds,
+                "BL1": fetch_bl1_odds,
+                "FL1": fetch_fl1_odds,
+                "SA": fetch_sa_odds,
+                "PD": fetch_pd_odds,
+            }
+            for key, fn in groups.items():
+                snap = None
+                try:
+                    snap = fn()
+                except Exception as e:
+                    ok[key] = {"error": str(e)}
+                    continue
+                if isinstance(snap, dict) and "events" in snap:
+                    self._bovada_cache[key] = snap
+                    self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
+                    try:
+                        out_path = self._bovada_snap_dir / f"bovada_{key}.json"
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        with out_path.open("w", encoding="utf-8") as fh:
+                            json.dump({"timestamp": now_loc.isoformat(), "snapshot": snap}, fh)
+                        ok[key] = {"events": len(snap.get("events") or [])}
+                    except Exception as e:
+                        ok[key] = {"events": len(snap.get("events") or []), "persist_error": str(e)}
+                else:
+                    ok[key] = {"error": "no events"}
+        except Exception as e:
+            return {"error": str(e)}
+        return ok
 
     def _prob_to_decimal(self, prob: Optional[float]) -> Optional[float]:
         try:

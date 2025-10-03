@@ -102,7 +102,9 @@ class EnhancedEPLService:
             try:
                 if _fixtures_count(d) > _fixtures_count(best):
                     best = d
-                elif _fixtures_count(d) == _fixtures_count(best) and _current_md(d) > _current_md(best):
+                elif _fixtures_count(d) == _fixtures_count(best) and _current_md(
+                    d
+                ) > _current_md(best):
                     best = d
             except Exception:
                 continue
@@ -253,16 +255,34 @@ class EnhancedEPLService:
 
             # Attach corners actuals if available
             date_str = enhanced_fixture.get("utc_date") or enhanced_fixture.get("date")
-            home_team_name = (
-                enhanced_fixture.get("home_team")
-                or enhanced_fixture.get("homeTeam")
-                or (enhanced_fixture.get("home", {}) or {}).get("name")
-            )
-            away_team_name = (
-                enhanced_fixture.get("away_team")
-                or enhanced_fixture.get("awayTeam")
-                or (enhanced_fixture.get("away", {}) or {}).get("name")
-            )
+            home_team_name = None
+            try:
+                home_team_name = (
+                    enhanced_fixture.get("home_team")
+                    or enhanced_fixture.get("homeTeam")
+                    or (enhanced_fixture.get("home") or {}).get("name")
+                )
+            except Exception:
+                try:
+                    h = enhanced_fixture.get("home")
+                    if isinstance(h, dict):
+                        home_team_name = h.get("name")
+                except Exception:
+                    home_team_name = None
+            away_team_name = None
+            try:
+                away_team_name = (
+                    enhanced_fixture.get("away_team")
+                    or enhanced_fixture.get("awayTeam")
+                    or (enhanced_fixture.get("away") or {}).get("name")
+                )
+            except Exception:
+                try:
+                    a = enhanced_fixture.get("away")
+                    if isinstance(a, dict):
+                        away_team_name = a.get("name")
+                except Exception:
+                    away_team_name = None
             c_actual = corners_actuals_store.lookup(
                 date_str, home_team_name, away_team_name
             )
@@ -286,8 +306,10 @@ class EnhancedEPLService:
                     if c_actual
                     else None,
                     # Additional match context
+                    # Best-effort H2H; guard missing keys to avoid subscriptable errors
                     "head_to_head": self._get_head_to_head_stats(
-                        fixture["home_team"], fixture["away_team"]
+                        (enhanced_fixture.get("home_team") or home_team_name or "Home"),
+                        (enhanced_fixture.get("away_team") or away_team_name or "Away"),
                     ),
                     "form_rating": {
                         "home": 0.5,  # Will be calculated from recent results

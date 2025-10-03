@@ -52,9 +52,18 @@ class EnhancedPlayerStatsService:
                         try:
                             df = frames[0]
                             for f in frames[1:]:
-                                common_cols = [c for c in ("Player", "Squad", "Pos") if c in df.columns and c in f.columns]
+                                common_cols = [
+                                    c
+                                    for c in ("Player", "Squad", "Pos")
+                                    if c in df.columns and c in f.columns
+                                ]
                                 if common_cols:
-                                    df = df.merge(f, on=common_cols, how="outer", suffixes=("", "_y"))
+                                    df = df.merge(
+                                        f,
+                                        on=common_cols,
+                                        how="outer",
+                                        suffixes=("", "_y"),
+                                    )
                                 else:
                                     df = df
                             # Normalize to our schema subset
@@ -62,36 +71,72 @@ class EnhancedPlayerStatsService:
                                 name = str(row.get("Player") or "").strip()
                                 team = str(row.get("Squad") or "").strip()
                                 pos = str(row.get("Pos") or "").strip()
-                                goals = int(row.get("Gls", 0)) if pd.notna(row.get("Gls")) else 0
-                                ast = int(row.get("Ast", 0)) if pd.notna(row.get("Ast")) else 0
-                                shots = int(row.get("Sh", 0)) if pd.notna(row.get("Sh")) else 0
-                                sot = int(row.get("SoT", 0)) if pd.notna(row.get("SoT")) else 0
+                                goals = (
+                                    int(row.get("Gls", 0))
+                                    if pd.notna(row.get("Gls"))
+                                    else 0
+                                )
+                                ast = (
+                                    int(row.get("Ast", 0))
+                                    if pd.notna(row.get("Ast"))
+                                    else 0
+                                )
+                                shots = (
+                                    int(row.get("Sh", 0))
+                                    if pd.notna(row.get("Sh"))
+                                    else 0
+                                )
+                                sot = (
+                                    int(row.get("SoT", 0))
+                                    if pd.notna(row.get("SoT"))
+                                    else 0
+                                )
                                 if name:
-                                    players.append({
-                                        "name": name,
-                                        "team": team or "",
-                                        "position": pos or "",
-                                        "age": int(row.get("Age", 0)) if pd.notna(row.get("Age")) else 0,
-                                        "season": self.season,
-                                        "games_played": int(row.get("MP", 0)) if pd.notna(row.get("MP")) else 0,
-                                        "minutes_played": int(row.get("Min", 0)) if pd.notna(row.get("Min")) else 0,
-                                        "goals": goals,
-                                        "assists": ast,
-                                        "shots": shots,
-                                        "shots_on_target": sot,
-                                        "yellow_cards": int(row.get("CrdY", 0)) if pd.notna(row.get("CrdY")) else 0,
-                                        "red_cards": int(row.get("CrdR", 0)) if pd.notna(row.get("CrdR")) else 0,
-                                        "average_rating": 0.0,
-                                        "form_rating": 0.0,
-                                        "pass_accuracy": 0.0,
-                                        "goals_per_game": round(goals / max(int(row.get("MP", 0)) or 1, 1), 2),
-                                        "assists_per_game": round(ast / max(int(row.get("MP", 0)) or 1, 1), 2),
-                                        "minutes_per_goal": 0,
-                                        "minutes_per_assist": 0,
-                                        "market_value_millions": 0,
-                                        "injury_status": "fit",
-                                        "contract_expires": "",
-                                    })
+                                    players.append(
+                                        {
+                                            "name": name,
+                                            "team": team or "",
+                                            "position": pos or "",
+                                            "age": int(row.get("Age", 0))
+                                            if pd.notna(row.get("Age"))
+                                            else 0,
+                                            "season": self.season,
+                                            "games_played": int(row.get("MP", 0))
+                                            if pd.notna(row.get("MP"))
+                                            else 0,
+                                            "minutes_played": int(row.get("Min", 0))
+                                            if pd.notna(row.get("Min"))
+                                            else 0,
+                                            "goals": goals,
+                                            "assists": ast,
+                                            "shots": shots,
+                                            "shots_on_target": sot,
+                                            "yellow_cards": int(row.get("CrdY", 0))
+                                            if pd.notna(row.get("CrdY"))
+                                            else 0,
+                                            "red_cards": int(row.get("CrdR", 0))
+                                            if pd.notna(row.get("CrdR"))
+                                            else 0,
+                                            "average_rating": 0.0,
+                                            "form_rating": 0.0,
+                                            "pass_accuracy": 0.0,
+                                            "goals_per_game": round(
+                                                goals
+                                                / max(int(row.get("MP", 0)) or 1, 1),
+                                                2,
+                                            ),
+                                            "assists_per_game": round(
+                                                ast
+                                                / max(int(row.get("MP", 0)) or 1, 1),
+                                                2,
+                                            ),
+                                            "minutes_per_goal": 0,
+                                            "minutes_per_assist": 0,
+                                            "market_value_millions": 0,
+                                            "injury_status": "fit",
+                                            "contract_expires": "",
+                                        }
+                                    )
                         except Exception:
                             players = []
                 self.players_data = players

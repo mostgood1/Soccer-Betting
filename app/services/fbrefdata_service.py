@@ -128,7 +128,9 @@ class FbrefDataService:
         - Safe no-op when fbrefdata is not available
         """
         season_str = season or _season_string_for_today()
-        res = BackfillResult(league=league.upper(), season=season_str, artifacts=[], notes=[])
+        res = BackfillResult(
+            league=league.upper(), season=season_str, artifacts=[], notes=[]
+        )
         # Lazy import if not available (handles runtime installs without restart)
         if not self.is_available or self._fd is None:
             try:
@@ -141,7 +143,9 @@ class FbrefDataService:
                 self.is_available = False
                 # record why import failed
                 if hasattr(ie, "__class__"):
-                    res.notes.append(f"fbrefdata import error: {ie.__class__.__name__}: {ie}")
+                    res.notes.append(
+                        f"fbrefdata import error: {ie.__class__.__name__}: {ie}"
+                    )
         if not self.is_available:
             res.notes.append("fbrefdata not installed or unavailable; skipped")
             return res
@@ -153,6 +157,7 @@ class FbrefDataService:
         _requests_patched = False
         try:
             import requests  # type: ignore
+
             orig_request = requests.sessions.Session.request
 
             def _patched_request(self_sess, method, url, **kwargs):  # type: ignore
@@ -194,9 +199,7 @@ class FbrefDataService:
                 try:
                     fb = self._fd.FBref("Big 5 European Leagues Combined", season_str)  # type: ignore[attr-defined]
                     comp_used = "Big 5 European Leagues Combined"
-                    res.notes.append(
-                        f"Init fallback to combined dataset due to: {e}"
-                    )
+                    res.notes.append(f"Init fallback to combined dataset due to: {e}")
                 except Exception as ee:
                     res.notes.append(f"Failed to init FBrefData: {e}\n{ee}")
                     return res
@@ -215,7 +218,9 @@ class FbrefDataService:
                     res.notes.append(f"schedule failed: {e}")
                     try:
                         # Fallback: build schedule from baked Football-Data fixtures
-                        built = self._fallback_schedule_from_baked(league, season_str, out_dir)
+                        built = self._fallback_schedule_from_baked(
+                            league, season_str, out_dir
+                        )
                         if built > 0:
                             res.schedule_rows = built
                             res.notes.append("schedule fallback: baked football-data")
@@ -284,7 +289,9 @@ class FbrefDataService:
                     pass
         return res
 
-    def _fallback_schedule_from_baked(self, league: str, season: str, out_dir: Path) -> int:
+    def _fallback_schedule_from_baked(
+        self, league: str, season: str, out_dir: Path
+    ) -> int:
         """Write schedule.csv using baked Football-Data JSON embedded in the image.
 
         This ensures artifacts exist even if fbref scraping is blocked. The columns
@@ -318,10 +325,7 @@ class FbrefDataService:
             fixtures = raw
         elif isinstance(raw, dict):
             fixtures = (
-                raw.get("fixtures")
-                or raw.get("matches")
-                or raw.get("records")
-                or []
+                raw.get("fixtures") or raw.get("matches") or raw.get("records") or []
             )
         rows = []
         for m in fixtures:
@@ -334,10 +338,14 @@ class FbrefDataService:
                     except Exception:
                         date = None
                 home = (
-                    m.get("homeTeam") or m.get("home_team") or (m.get("home") or {}).get("name")
+                    m.get("homeTeam")
+                    or m.get("home_team")
+                    or (m.get("home") or {}).get("name")
                 )
                 away = (
-                    m.get("awayTeam") or m.get("away_team") or (m.get("away") or {}).get("name")
+                    m.get("awayTeam")
+                    or m.get("away_team")
+                    or (m.get("away") or {}).get("name")
                 )
                 if not (home and away and date):
                     continue
@@ -376,7 +384,9 @@ class FbrefDataService:
           - goalkeeping.csv (optional)
         """
         season_str = season or _season_string_for_today()
-        res = BackfillResult(league=league.upper(), season=season_str, artifacts=[], notes=[])
+        res = BackfillResult(
+            league=league.upper(), season=season_str, artifacts=[], notes=[]
+        )
         src_dir = Path("data/manual_fbref_import") / league.upper() / season_str
         if not src_dir.exists():
             res.notes.append(f"source directory not found: {src_dir}")

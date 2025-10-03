@@ -79,15 +79,15 @@ A predictable soccer betting platform focused on EPL with scalability for multip
    # Using VS Code task
    Ctrl+Shift+P -> "Tasks: Run Task" -> "Start Soccer Betting API"
    
-   # Or directly in terminal
-   uvicorn app.main:app --reload
+   # Or directly in terminal (choose a port)
+   uvicorn app.main:app --reload --port 8040
    ```
 5. **Visit the API documentation**:
-   - Interactive Docs: http://127.0.0.1:8000/docs
-   - ReDoc: http://127.0.0.1:8000/redoc
+   - Interactive Docs: http://127.0.0.1:8040/docs
+   - ReDoc: http://127.0.0.1:8040/redoc
 
 ### Script Options
-- **PowerShell**: `.\start-app.ps1 -Port 3000 -ServerHost 0.0.0.0 -NoReload`
+- **PowerShell**: `.\start-app.ps1 -Port 8040 -NoReload`
 - **Batch**: Simple double-click to start on default settings
 
 ### Database Setup (Optional)

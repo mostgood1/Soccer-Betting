@@ -9,7 +9,7 @@ import json
 
 def test_api_endpoints():
     """Test key API endpoints"""
-    base_url = "http://127.0.0.1:8000"
+    base_url = "http://127.0.0.1:8040"
 
     print("🧪 TESTING EPL BETTING API ENDPOINTS")
     print("=" * 50)

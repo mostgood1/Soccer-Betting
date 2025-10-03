@@ -100,6 +100,8 @@ NORMALIZATION_MAP: Dict[str, str] = {
     "sevilla fc": "Sevilla FC",
     "valencia": "Valencia CF",
     "valencia cf": "Valencia CF",
+    "getafe cf": "Getafe",
+    "lorient": "Lorient",
     # Ligue 1
     "psg": "Paris Saint-Germain",
     "paris saint-germain": "Paris Saint-Germain",
@@ -113,6 +115,8 @@ NORMALIZATION_MAP: Dict[str, str] = {
     "lille osc": "Lille OSC",
     "stade rennais": "Stade Rennais FC",
     "rennes": "Stade Rennais FC",
+    "paris fc": "Paris FC",
+    "fc lorient": "Lorient",
     # Serie A
     "inter": "Inter",
     "inter milan": "Inter",
@@ -181,6 +185,10 @@ _STOP_TOKENS = {
     "sad",
     "ud",
     "ac",
+    # spain-specific common prefixes
+    "rcd",  # Real Club Deportivo (e.g., RCD Espanyol)
+    "ca",   # Club Atlético (e.g., CA Osasuna)
+    "deportivo",  # Deportivo Alavés -> Alavés
 }
 
 

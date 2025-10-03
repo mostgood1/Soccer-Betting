@@ -34,7 +34,10 @@ try:
 except Exception as e:  # pragma: no cover
     sd = None  # type: ignore
 
-from app.services.league_manager import get_service as get_league_service, normalize_league_code
+from app.services.league_manager import (
+    get_service as get_league_service,
+    normalize_league_code,
+)
 from app.services.game_week_service import game_week_service
 from app.services.team_name_normalizer import normalize_team_name
 
@@ -138,7 +141,9 @@ def _filter_by_competition(df: pd.DataFrame, league_code: str) -> pd.DataFrame:
     cand_cols = [
         c
         for c in cols
-        if any(k in str(c).lower() for k in ["comp", "league", "competition", "country"])
+        if any(
+            k in str(c).lower() for k in ["comp", "league", "competition", "country"]
+        )
     ]
     if not cand_cols:
         return df
@@ -379,7 +384,8 @@ def main():
         if "-" in token:
             try:
                 a, b = token.split("-", 1)
-                a_i = int(a); b_i = int(b)
+                a_i = int(a)
+                b_i = int(b)
                 if a_i <= b_i:
                     weeks_list.extend(list(range(a_i, b_i + 1)))
                 else:

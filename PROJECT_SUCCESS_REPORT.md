@@ -97,13 +97,13 @@ python launch_enhanced.py
 python -m app.main
 
 # Method 3: With uvicorn
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8040
 ```
 
 ### **Access Your Platform:**
-- **Main API**: http://127.0.0.1:8000
-- **API Documentation**: http://127.0.0.1:8000/docs
-- **Health Check**: http://127.0.0.1:8000/health
+- **Main API**: http://127.0.0.1:8040
+- **API Documentation**: http://127.0.0.1:8040/docs
+- **Health Check**: http://127.0.0.1:8040/health
 
 ### **Run Comprehensive Demo:**
 ```bash

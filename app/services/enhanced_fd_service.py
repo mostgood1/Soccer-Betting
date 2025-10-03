@@ -86,6 +86,29 @@ class EnhancedFDService:
         enhanced: List[Dict[str, Any]] = []
         for f in fixtures:
             m = dict(f)
+            # Normalize common fields expected by upstream endpoints/UI
+            try:
+                # utc_date normalization (accept 'utcDate' or 'date')
+                if not m.get("utc_date"):
+                    if m.get("utcDate"):
+                        m["utc_date"] = m.get("utcDate")
+                    elif m.get("date"):
+                        m["utc_date"] = m.get("date")
+                # Standardize team name keys
+                if not m.get("home_team"):
+                    m["home_team"] = (
+                        m.get("homeTeam")
+                        or (m.get("home") or {}).get("name")
+                        or m.get("home")
+                    )
+                if not m.get("away_team"):
+                    m["away_team"] = (
+                        m.get("awayTeam")
+                        or (m.get("away") or {}).get("name")
+                        or m.get("away")
+                    )
+            except Exception:
+                pass
             # Venue backfill via team index
             try:
                 if not m.get("venue"):

@@ -5,14 +5,14 @@ param(
   [switch]$RebuildPL
 )
 
-$BaseUrl = "http://127.0.0.1:8000"
+$BaseUrl = "http://127.0.0.1:8040"
 
 # Ensure server is up; if not, try to start it in a new window
 try {
   $ping = Invoke-RestMethod -Uri "$BaseUrl/api/debug/ping" -TimeoutSec 3
 } catch {
-  Write-Host "API not responding on 8000; attempting to start server..." -ForegroundColor Yellow
-  Start-Process powershell -ArgumentList "-NoProfile","-Command",".\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000" -WindowStyle Hidden
+  Write-Host "API not responding on 8040; attempting to start server..." -ForegroundColor Yellow
+  Start-Process powershell -ArgumentList "-NoProfile","-Command",".\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8040" -WindowStyle Hidden
   Start-Sleep -Seconds 3
 }
 

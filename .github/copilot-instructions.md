@@ -29,5 +29,5 @@ This is a predictable soccer betting platform focused on EPL with scalability fo
 - [x] Customize project for betting platform features
 - [x] Install required dependencies
 - [x] Create development tasks
-- [x] Launch project - API running at http://127.0.0.1:8000
+- [x] Launch project - API running at http://127.0.0.1:8040 (default)
 - [x] Complete documentation

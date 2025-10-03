@@ -95,10 +95,19 @@ class GameWeekManager {
     }
     
     async init() {
-        await Promise.all([
-            this.loadGameWeeks(),
-            this.loadBranding()
-        ]);
+        try {
+            await Promise.all([
+                this.loadGameWeeks(),
+                this.loadBranding()
+            ]);
+        } catch (e) {
+            // Don’t leave the UI stuck on "Loading game weeks..." if the API is slow/unavailable
+            console.error('Failed to initialize GameWeekManager:', e);
+            // Ensure minimal safe state so render() can show a fallback panel
+            this.gameWeeks = this.gameWeeks || {};
+            this.weekSummaries = this.weekSummaries || {};
+            if (!this.currentWeek || isNaN(this.currentWeek)) this.currentWeek = 1;
+        }
         this.render();
         this.setupEventListeners();
     }
@@ -240,6 +249,10 @@ class GameWeekManager {
                 <div class="game-cards-grid" id="game-cards">
                     Loading game cards...
                 </div>
+                <div class="cron-footer" id="cron-footer" style="margin-top:16px;color:#6b7280;font-size:12px;">
+                    <span>Sync status: <span id="cron-status-text">loading…</span></span>
+                    <button id="cron-retry" class="week-jump-btn" style="margin-left:8px;">Retry hydrate</button>
+                </div>
             </div>
         `;
         
@@ -247,6 +260,52 @@ class GameWeekManager {
         this.renderGameCards();
         this.renderModelPerformance();
         this.attachWeekNavHandlers();
+        this.attachCronHelpers();
+    }
+
+    async attachCronHelpers() {
+        const el = document.getElementById('cron-status-text');
+        const btn = document.getElementById('cron-retry');
+        if (!el || !btn) return;
+        // Load last cron timestamps
+        try {
+            const r = await fetch(`${this.apiBaseUrl}/api/admin/status/cron-summary`);
+            if (r.ok) {
+                const data = await r.json();
+                // Backend returns a flat object with job names as keys
+                const candidates = ['refresh-bovada','snapshot-csv','daily-update','capture-closing'];
+                let bestTs = null;
+                for (const k of candidates) {
+                    const v = data && data[k];
+                    const ts = v && v.timestamp ? v.timestamp : null;
+                    if (ts) {
+                        if (!bestTs || new Date(ts) > new Date(bestTs)) bestTs = ts;
+                    }
+                }
+                if (bestTs) {
+                    el.textContent = `last refresh ${new Date(bestTs).toLocaleString()}`;
+                } else {
+                    el.textContent = 'no recent sync info';
+                }
+            } else {
+                el.textContent = 'status unavailable';
+            }
+        } catch { el.textContent = 'status unavailable'; }
+        // Retry button triggers quick hydrate
+        btn.onclick = async () => {
+            btn.disabled = true; btn.textContent = 'Hydrating…';
+            try {
+                await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
+                await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
+                await this.loadWeekOdds(this.currentWeek);
+                this.patchCardsWithBookOdds();
+                el.textContent = 'hydrated just now';
+            } catch (e) {
+                el.textContent = 'hydrate failed';
+            } finally {
+                btn.disabled = false; btn.textContent = 'Retry hydrate';
+            }
+        };
     }
 
     attachWeekNavHandlers() {
@@ -415,7 +474,7 @@ class GameWeekManager {
                             <div class="game-date js-local-time" title="${localParts.long}">${localParts.date} ${localParts.time}</div>
                             <div class="venue">${venue}</div>
                             <div class="state">${statusText}</div>
-                            <div class="period-pill">${match.is_completed ? 'Final' : ''}</div>
+                            <div class="period-pill">${match.is_live ? 'Live' : ''}</div>
                             <div class="time-left">—</div>
                         </div>`;
                 // NHL-style matchup row with score blocks
@@ -603,11 +662,120 @@ class GameWeekManager {
 
     // Week odds: fetch and map by home/away name
     async loadWeekOdds(week) {
-        const resp = await fetch(`${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=10&league=${encodeURIComponent(this.league)}`);
-        if (!resp.ok) throw new Error(`Week odds fetch failed (${resp.status})`);
-        const data = await resp.json();
-        this.weekOdds = Array.isArray(data.matches) ? data.matches : [];
+    // Prefer CSV/cache-only first with a timeout; optionally try live if needed
+        const attempt = async (cacheOnly, timeoutMs) => {
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+                const url = `${this.apiBaseUrl}/api/betting/odds/week/${week}?limit=10&league=${encodeURIComponent(this.league)}&cache_only=${cacheOnly ? 'true' : 'false'}`;
+                const resp = await fetch(url, { signal: controller.signal });
+                clearTimeout(t);
+                if (!resp.ok) throw new Error(`Week odds fetch failed (${resp.status})`);
+                const data = await resp.json();
+                return Array.isArray(data.matches) ? data.matches : [];
+            } catch (e) {
+                clearTimeout(t);
+                throw e;
+            }
+        };
+
+        try {
+            // 1) Cache-only fast path within 6s
+            this.weekOdds = await attempt(true, 6000);
+        } catch (e1) {
+            // 2) Optional live attempt within 8s
+            try {
+                this.weekOdds = await attempt(false, 8000);
+            } catch (e2) {
+                console.warn('Week odds unavailable (cache and live failed):', e2?.message || e2);
+                this.weekOdds = [];
+            }
+        }
+
+        // 3) If still empty on first load, try a one-time hydrate: refresh Bovada snapshots and clear week cache, then retry cache-only
+        if ((!this.weekOdds || this.weekOdds.length === 0) && !this._hydratedWeekOddsOnce) {
+            this._hydratedWeekOddsOnce = true;
+            try {
+                // Fire-and-forget admin refresh (no auth required)
+                await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
+                // Clear server-side week odds TTL cache
+                await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
+                // Retry cache-only quickly
+                this.weekOdds = await attempt(true, 8000);
+            } catch (e3) {
+                console.warn('Week odds hydrate retry failed:', e3?.message || e3);
+            }
+        }
+
         return this.weekOdds;
+    }
+
+    // Extend cron helpers with a quick CSV write action
+    async attachCronHelpers() {
+        const el = document.getElementById('cron-status-text');
+        const btn = document.getElementById('cron-retry');
+        if (!el || !btn) return;
+        // Load last cron timestamps
+        try {
+            const r = await fetch(`${this.apiBaseUrl}/api/admin/status/cron-summary`);
+            if (r.ok) {
+                const data = await r.json();
+                const candidates = ['refresh-bovada','snapshot-csv','daily-update','capture-closing'];
+                let bestTs = null;
+                for (const k of candidates) {
+                    const v = data && data[k];
+                    const ts = v && v.timestamp ? v.timestamp : null;
+                    if (ts) {
+                        if (!bestTs || new Date(ts) > new Date(bestTs)) bestTs = ts;
+                    }
+                }
+                if (bestTs) {
+                    el.textContent = `last refresh ${new Date(bestTs).toLocaleString()}`;
+                } else {
+                    el.textContent = 'no recent sync info';
+                }
+            } else {
+                el.textContent = 'status unavailable';
+            }
+        } catch { el.textContent = 'status unavailable'; }
+        // Retry button triggers quick hydrate
+        btn.onclick = async () => {
+            btn.disabled = true; btn.textContent = 'Hydrating…';
+            try {
+                await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
+                await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
+                await this.loadWeekOdds(this.currentWeek);
+                this.patchCardsWithBookOdds();
+                el.textContent = 'hydrated just now';
+            } catch (e) {
+                el.textContent = 'hydrate failed';
+            } finally {
+                btn.disabled = false; btn.textContent = 'Retry hydrate';
+            }
+        };
+        // Add a quick CSV write action
+        const footer = document.getElementById('cron-footer');
+        if (footer) {
+            const csvBtn = document.createElement('button');
+            csvBtn.className = 'week-jump-btn';
+            csvBtn.style.marginLeft = '8px';
+            csvBtn.textContent = 'Write CSVs';
+            footer.appendChild(csvBtn);
+            csvBtn.onclick = async () => {
+                csvBtn.disabled = true; csvBtn.textContent = 'Writing…';
+                try {
+                    await fetch(`${this.apiBaseUrl}/api/admin/odds/snapshot-csv/quick`, { method: 'POST' });
+                    await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
+                    await this.loadWeekOdds(this.currentWeek);
+                    this.patchCardsWithBookOdds();
+                    el.textContent = 'csv written just now';
+                } catch (e) {
+                    el.textContent = 'csv write failed';
+                } finally {
+                    csvBtn.disabled = false; csvBtn.textContent = 'Write CSVs';
+                }
+            };
+        }
     }
 
     findWeekOddsRow(match) {

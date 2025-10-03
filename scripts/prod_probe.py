@@ -163,6 +163,7 @@ def main() -> int:
 
     # Kick precompute-recommendations (requires token). Do per-league calls to avoid a single long request.
     if token and not args.skip_cron:
+
         def precompute_one(lg: str):
             r = _post(
                 base,
