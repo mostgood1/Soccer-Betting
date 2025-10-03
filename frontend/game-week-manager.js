@@ -850,6 +850,16 @@ class GameWeekManager {
                 csvBtn.textContent = 'Write CSVs';
                 footer.appendChild(csvBtn);
             }
+            // Build weekly files button (odds, predictions, results)
+            let wkBtn = footer.querySelector('#build-weekly-btn');
+            if (!wkBtn) {
+                wkBtn = document.createElement('button');
+                wkBtn.id = 'build-weekly-btn';
+                wkBtn.className = 'week-jump-btn';
+                wkBtn.style.marginLeft = '8px';
+                wkBtn.textContent = 'Build Weekly Files';
+                footer.appendChild(wkBtn);
+            }
             csvBtn.onclick = async () => {
                 csvBtn.disabled = true; csvBtn.textContent = 'Writing…';
                 try {
@@ -862,6 +872,25 @@ class GameWeekManager {
                     el.textContent = 'csv write failed';
                 } finally {
                     csvBtn.disabled = false; csvBtn.textContent = 'Write CSVs';
+                }
+            };
+            wkBtn.onclick = async () => {
+                wkBtn.disabled = true; wkBtn.textContent = 'Building…';
+                try {
+                    await fetch(`${this.apiBaseUrl}/api/admin/weekly/write?league=${encodeURIComponent(this.league)}&week=${this.currentWeek}`, { method: 'POST' });
+                    // Re-load from bundle
+                    const fresh = await this.loadWeekDetails(this.currentWeek);
+                    if (fresh && Array.isArray(fresh.matches) && fresh.matches.length) {
+                        this.currentWeekDetails = fresh;
+                        this.render();
+                        el.textContent = 'weekly files built';
+                    } else {
+                        el.textContent = 'weekly files built (no matches)';
+                    }
+                } catch (e) {
+                    el.textContent = 'weekly write failed';
+                } finally {
+                    wkBtn.disabled = false; wkBtn.textContent = 'Build Weekly Files';
                 }
             };
         }
