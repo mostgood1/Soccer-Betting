@@ -316,6 +316,49 @@ def build_weekly_bundle(league: str, week: int) -> Dict[str, Any]:
 
     lg = (league or "PL").upper()
     paths = _weekly_paths(lg, int(week))
+    # Build a kickoff index from league fixtures for this week so we can attach real timestamps
+    wk_matches = _week_matches(lg, int(week))
+    kickoff_index: Dict[str, str] = {}
+    for m in wk_matches:
+        try:
+            home = normalize_team_name(
+                m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name")
+            ) or (m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name"))
+            away = normalize_team_name(
+                m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name")
+            ) or (m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name"))
+            if not (home and away):
+                continue
+            d = m.get("utc_date") or m.get("date") or ""
+            date_key = d.split("T")[0] if isinstance(d, str) else ""
+            key = f"{date_key}|{home.lower()}|{away.lower()}"
+            if isinstance(d, str) and d:
+                kickoff_index[key] = d
+        except Exception:
+            continue
+
+    def _attach_kickoff(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out_rows: List[Dict[str, Any]] = []
+        for r in rows:
+            try:
+                home = normalize_team_name(r.get("home_team") or r.get("home") or r.get("Home")) or (
+                    r.get("home_team") or r.get("home") or r.get("Home")
+                )
+                away = normalize_team_name(r.get("away_team") or r.get("away") or r.get("Away")) or (
+                    r.get("away_team") or r.get("away") or r.get("Away")
+                )
+                date_key = (r.get("date") or r.get("Date") or "")
+                if isinstance(date_key, str):
+                    date_key = date_key.split("T")[0]
+                key = f"{date_key}|{(home or '').lower()}|{(away or '').lower()}"
+                utc_kick = kickoff_index.get(key)
+                if utc_kick and "utc_kickoff" not in r:
+                    r = dict(r)
+                    r["utc_kickoff"] = utc_kick
+            except Exception:
+                pass
+            out_rows.append(r)
+        return out_rows
     out: Dict[str, Any] = {
         "league": lg,
         "week": int(week),
@@ -327,17 +370,17 @@ def build_weekly_bundle(league: str, week: int) -> Dict[str, Any]:
     if paths["odds"].exists():
         with paths["odds"].open("r", newline="", encoding="utf-8") as f:
             r = _csv.DictReader(f)
-            out["odds"] = list(r)
+            out["odds"] = _attach_kickoff(list(r))
     # Predictions
     if paths["predictions"].exists():
         with paths["predictions"].open("r", newline="", encoding="utf-8") as f:
             r = _csv.DictReader(f)
-            out["predictions"] = list(r)
+            out["predictions"] = _attach_kickoff(list(r))
     # Results
     if paths["results"].exists():
         with paths["results"].open("r", newline="", encoding="utf-8") as f:
             r = _csv.DictReader(f)
-            out["results"] = list(r)
+            out["results"] = _attach_kickoff(list(r))
     # Persist bundle JSON
     paths["bundle"].write_text(json.dumps(out, indent=2), encoding="utf-8")
     return {
