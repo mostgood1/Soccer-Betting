@@ -263,76 +263,6 @@ class GameWeekManager {
         this.attachCronHelpers();
     }
 
-    async attachCronHelpers() {
-        const el = document.getElementById('cron-status-text');
-        const btn = document.getElementById('cron-retry');
-        if (!el || !btn) return;
-        // Load last cron timestamps
-        try {
-            const r = await fetch(`${this.apiBaseUrl}/api/admin/status/cron-summary`);
-            if (r.ok) {
-                const data = await r.json();
-                // Backend returns a flat object with job names as keys
-                const candidates = ['refresh-bovada','snapshot-csv','daily-update','capture-closing'];
-                let bestTs = null;
-                for (const k of candidates) {
-                    const v = data && data[k];
-                    const ts = v && v.timestamp ? v.timestamp : null;
-                    if (ts) {
-                        if (!bestTs || new Date(ts) > new Date(bestTs)) bestTs = ts;
-                    }
-                }
-                if (bestTs) {
-                    el.textContent = `last refresh ${new Date(bestTs).toLocaleString()}`;
-                } else {
-                    el.textContent = 'no recent sync info';
-                }
-            } else {
-                el.textContent = 'status unavailable';
-            }
-        } catch { el.textContent = 'status unavailable'; }
-        // Retry button triggers quick hydrate (refresh -> snapshot CSVs -> precompute -> clear cache -> reload odds)
-        btn.onclick = async () => {
-            btn.disabled = true; btn.textContent = 'Hydrating…';
-            try {
-                // 1) Refresh provider snapshots (Bovada EU-first)
-                await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
-                // 2) Quick-write CSVs for extended markets to ensure CSV-first reads are populated
-                try { await fetch(`${this.apiBaseUrl}/api/admin/odds/snapshot-csv/quick`, { method: 'POST' }); } catch {}
-                // 3) Precompute week recommendations (requires dev token in local)
-                try { await fetch(`${this.apiBaseUrl}/api/cron/precompute-recommendations?token=dev`, { method: 'POST' }); } catch {}
-                // 4) Clear server-side week odds TTL cache, then reload odds
-                await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
-                await this.loadWeekOdds(this.currentWeek);
-                this.patchCardsWithBookOdds();
-                // Refresh cron summary banner after actions
-                try {
-                    const r = await fetch(`${this.apiBaseUrl}/api/admin/status/cron-summary`);
-                    if (r.ok) {
-                        const data = await r.json();
-                        const stamps = [
-                            data && data['refresh-bovada'] && data['refresh-bovada'].timestamp,
-                            data && data['snapshot-csv'] && data['snapshot-csv'].timestamp,
-                            data && data['precompute-recommendations'] && data['precompute-recommendations'].timestamp,
-                        ].filter(Boolean);
-                        if (stamps.length) {
-                            const latest = stamps.sort().slice(-1)[0];
-                            el.textContent = `hydrated at ${new Date(latest).toLocaleString()}`;
-                        } else {
-                            el.textContent = 'hydrated just now';
-                        }
-                    } else {
-                        el.textContent = 'hydrated just now';
-                    }
-                } catch { el.textContent = 'hydrated just now'; }
-            } catch (e) {
-                el.textContent = 'hydrate failed';
-            } finally {
-                btn.disabled = false; btn.textContent = 'Retry hydrate';
-            }
-        };
-    }
-
     attachWeekNavHandlers() {
         const prev = document.getElementById('prev-week');
         const next = document.getElementById('next-week');
@@ -666,6 +596,13 @@ class GameWeekManager {
             const resp = await fetch(url);
             if (!resp.ok) throw new Error(`Failed BTTS compare: HTTP ${resp.status}`);
             this.bttsCompare = await resp.json();
+            if ((!this.bttsCompare || !this.bttsCompare.matches || this.bttsCompare.matches.length === 0) && !this._bttsRetry) {
+                this._bttsRetry = true;
+                await this.ensureSnapshotsThen(async () => {
+                    const r2 = await fetch(url);
+                    if (r2.ok) this.bttsCompare = await r2.json();
+                });
+            }
             this.patchCardsWithBTTS();
         } catch (e) {
             console.warn('BTTS comparison unavailable:', e.message || e);
@@ -821,11 +758,16 @@ class GameWeekManager {
         // Add a quick CSV write action
         const footer = document.getElementById('cron-footer');
         if (footer) {
-            const csvBtn = document.createElement('button');
-            csvBtn.className = 'week-jump-btn';
-            csvBtn.style.marginLeft = '8px';
-            csvBtn.textContent = 'Write CSVs';
-            footer.appendChild(csvBtn);
+            // Avoid duplicate buttons across re-renders
+            let csvBtn = footer.querySelector('#write-csvs-btn');
+            if (!csvBtn) {
+                csvBtn = document.createElement('button');
+                csvBtn.id = 'write-csvs-btn';
+                csvBtn.className = 'week-jump-btn';
+                csvBtn.style.marginLeft = '8px';
+                csvBtn.textContent = 'Write CSVs';
+                footer.appendChild(csvBtn);
+            }
             csvBtn.onclick = async () => {
                 csvBtn.disabled = true; csvBtn.textContent = 'Writing…';
                 try {
@@ -841,6 +783,19 @@ class GameWeekManager {
                 }
             };
         }
+    }
+
+    // One-time helper: ensure CSV snapshots exist, then try to refetch a comparison payload
+    async ensureSnapshotsThen(refetchFn) {
+        if (this._snapEnsured) {
+            return refetchFn();
+        }
+        this._snapEnsured = true;
+        try {
+            await fetch(`${this.apiBaseUrl}/api/admin/odds/snapshot-csv/quick`, { method: 'POST' });
+            await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
+        } catch {}
+        return refetchFn();
     }
 
     findWeekOddsRow(match) {
@@ -874,6 +829,21 @@ class GameWeekManager {
             ]);
             if (homeResp.ok) this.teamGoalsCompare.home = await homeResp.json(); else this.teamGoalsCompare.home = null;
             if (awayResp.ok) this.teamGoalsCompare.away = await awayResp.json(); else this.teamGoalsCompare.away = null;
+            if (!this._tgRetry) {
+                const empty = (!this.teamGoalsCompare.home || !this.teamGoalsCompare.home.matches || this.teamGoalsCompare.home.matches.length===0)
+                    && (!this.teamGoalsCompare.away || !this.teamGoalsCompare.away.matches || this.teamGoalsCompare.away.matches.length===0);
+                if (empty) {
+                    this._tgRetry = true;
+                    await this.ensureSnapshotsThen(async () => {
+                        const [h2, a2] = await Promise.all([
+                            fetch(`${this.apiBaseUrl}/api/game-weeks/${week}/team-goals-compare?side=home&line=1.5&league=${encodeURIComponent(this.league)}`),
+                            fetch(`${this.apiBaseUrl}/api/game-weeks/${week}/team-goals-compare?side=away&line=1.5&league=${encodeURIComponent(this.league)}`)
+                        ]);
+                        if (h2.ok) this.teamGoalsCompare.home = await h2.json();
+                        if (a2.ok) this.teamGoalsCompare.away = await a2.json();
+                    });
+                }
+            }
             this.patchCardsWithTeamGoals();
         } catch (e) {
             console.warn('Team goals comparison unavailable:', e.message || e);
@@ -952,6 +922,21 @@ class GameWeekManager {
             ]);
             if (homeResp.ok) this.teamCornersCompare.home = await homeResp.json(); else this.teamCornersCompare.home = null;
             if (awayResp.ok) this.teamCornersCompare.away = await awayResp.json(); else this.teamCornersCompare.away = null;
+            if (!this._tcRetry) {
+                const empty = (!this.teamCornersCompare.home || !this.teamCornersCompare.home.matches || this.teamCornersCompare.home.matches.length===0)
+                    && (!this.teamCornersCompare.away || !this.teamCornersCompare.away.matches || this.teamCornersCompare.away.matches.length===0);
+                if (empty) {
+                    this._tcRetry = true;
+                    await this.ensureSnapshotsThen(async () => {
+                        const [h2, a2] = await Promise.all([
+                            fetch(`${this.apiBaseUrl}/api/game-weeks/${week}/team-corners-compare?side=home&line=4.5&league=${encodeURIComponent(this.league)}`),
+                            fetch(`${this.apiBaseUrl}/api/game-weeks/${week}/team-corners-compare?side=away&line=4.5&league=${encodeURIComponent(this.league)}`)
+                        ]);
+                        if (h2.ok) this.teamCornersCompare.home = await h2.json();
+                        if (a2.ok) this.teamCornersCompare.away = await a2.json();
+                    });
+                }
+            }
             this.patchCardsWithTeamCorners();
         } catch (e) {
             console.warn('Team corners comparison unavailable:', e.message || e);
@@ -1017,6 +1002,13 @@ class GameWeekManager {
             const resp = await fetch(url);
             if (!resp.ok) throw new Error(`Failed totals compare: HTTP ${resp.status}`);
             this.totalsCompare = await resp.json();
+            if ((!this.totalsCompare || !this.totalsCompare.matches || this.totalsCompare.matches.length === 0) && !this._totalsRetry) {
+                this._totalsRetry = true;
+                await this.ensureSnapshotsThen(async () => {
+                    const r2 = await fetch(url);
+                    if (r2.ok) this.totalsCompare = await r2.json();
+                });
+            }
             this.patchCardsWithTotals();
         } catch (e) {
             console.warn('Totals comparison unavailable:', e.message);
@@ -1090,6 +1082,13 @@ class GameWeekManager {
             const resp = await fetch(url);
             if (!resp.ok) throw new Error(`Failed first half compare: HTTP ${resp.status}`);
             this.firstHalfCompare = await resp.json();
+            if ((!this.firstHalfCompare || !this.firstHalfCompare.matches || this.firstHalfCompare.matches.length === 0) && !this._fhRetry) {
+                this._fhRetry = true;
+                await this.ensureSnapshotsThen(async () => {
+                    const r2 = await fetch(url);
+                    if (r2.ok) this.firstHalfCompare = await r2.json();
+                });
+            }
             this.patchCardsWithFirstHalf();
         } catch (e) { console.warn('First half comparison unavailable:', e.message); this.firstHalfCompare = null; }
     }
@@ -1148,6 +1147,13 @@ class GameWeekManager {
             const resp = await fetch(url);
             if (!resp.ok) throw new Error(`Failed second half compare: HTTP ${resp.status}`);
             this.secondHalfCompare = await resp.json();
+            if ((!this.secondHalfCompare || !this.secondHalfCompare.matches || this.secondHalfCompare.matches.length === 0) && !this._shRetry) {
+                this._shRetry = true;
+                await this.ensureSnapshotsThen(async () => {
+                    const r2 = await fetch(url);
+                    if (r2.ok) this.secondHalfCompare = await r2.json();
+                });
+            }
             this.patchCardsWithSecondHalf();
         } catch (e) { console.warn('Second half comparison unavailable:', e.message); this.secondHalfCompare = null; }
     }
@@ -1207,6 +1213,13 @@ class GameWeekManager {
             const resp = await fetch(`${this.apiBaseUrl}/api/game-weeks/${week}/odds-compare?league=${encodeURIComponent(this.league)}`);
             if (!resp.ok) throw new Error('Failed odds compare');
             this.oddsCompare = await resp.json();
+            if ((!this.oddsCompare || !this.oddsCompare.matches || this.oddsCompare.matches.length === 0) && !this._oddsRetry) {
+                this._oddsRetry = true;
+                await this.ensureSnapshotsThen(async () => {
+                    const r2 = await fetch(`${this.apiBaseUrl}/api/game-weeks/${week}/odds-compare?league=${encodeURIComponent(this.league)}`);
+                    if (r2.ok) this.oddsCompare = await r2.json();
+                });
+            }
             // After fetch, update existing cards with odds comparison sections
             this.patchCardsWithOdds();
             this.patchWeekStatsOddsNotice();
