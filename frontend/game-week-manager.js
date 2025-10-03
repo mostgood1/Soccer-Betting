@@ -291,15 +291,40 @@ class GameWeekManager {
                 el.textContent = 'status unavailable';
             }
         } catch { el.textContent = 'status unavailable'; }
-        // Retry button triggers quick hydrate
+        // Retry button triggers quick hydrate (refresh -> snapshot CSVs -> precompute -> clear cache -> reload odds)
         btn.onclick = async () => {
             btn.disabled = true; btn.textContent = 'Hydrating…';
             try {
+                // 1) Refresh provider snapshots (Bovada EU-first)
                 await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
+                // 2) Quick-write CSVs for extended markets to ensure CSV-first reads are populated
+                try { await fetch(`${this.apiBaseUrl}/api/admin/odds/snapshot-csv/quick`, { method: 'POST' }); } catch {}
+                // 3) Precompute week recommendations (requires dev token in local)
+                try { await fetch(`${this.apiBaseUrl}/api/cron/precompute-recommendations?token=dev`, { method: 'POST' }); } catch {}
+                // 4) Clear server-side week odds TTL cache, then reload odds
                 await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
                 await this.loadWeekOdds(this.currentWeek);
                 this.patchCardsWithBookOdds();
-                el.textContent = 'hydrated just now';
+                // Refresh cron summary banner after actions
+                try {
+                    const r = await fetch(`${this.apiBaseUrl}/api/admin/status/cron-summary`);
+                    if (r.ok) {
+                        const data = await r.json();
+                        const stamps = [
+                            data && data['refresh-bovada'] && data['refresh-bovada'].timestamp,
+                            data && data['snapshot-csv'] && data['snapshot-csv'].timestamp,
+                            data && data['precompute-recommendations'] && data['precompute-recommendations'].timestamp,
+                        ].filter(Boolean);
+                        if (stamps.length) {
+                            const latest = stamps.sort().slice(-1)[0];
+                            el.textContent = `hydrated at ${new Date(latest).toLocaleString()}`;
+                        } else {
+                            el.textContent = 'hydrated just now';
+                        }
+                    } else {
+                        el.textContent = 'hydrated just now';
+                    }
+                } catch { el.textContent = 'hydrated just now'; }
             } catch (e) {
                 el.textContent = 'hydrate failed';
             } finally {
