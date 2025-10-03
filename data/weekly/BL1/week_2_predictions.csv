@@ -1,0 +1,10 @@
+league,week,date,home_team,away_team,pH,pD,pA,total_goals,pick,confidence,model_version
+BL1,2,2025-08-29,Hamburger SV,St Pauli,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-30,RB Leipzig,Heidenheim,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-30,SV Werder Bremen,Bayer 04 Leverkusen,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-30,VfB Stuttgart,Borussia Mönchengladbach,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-30,TSG 1899 Hoffenheim,Eintracht Frankfurt,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-30,FC Augsburg,Bayern Munich,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-31,VfL Wolfsburg,FSV Mainz,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-31,Borussia Dortmund,Union Berlin,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+BL1,2,2025-08-31,1. FC Köln,SC Freiburg,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10

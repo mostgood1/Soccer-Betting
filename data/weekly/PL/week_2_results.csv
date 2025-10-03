@@ -1,0 +1,11 @@
+league,week,date,home_team,away_team,home_score,away_score,result,status
+PL,2,2025-08-22,West Ham,Chelsea,1,5,A,FINISHED
+PL,2,2025-08-23,Manchester City,Tottenham,,2,,FINISHED
+PL,2,2025-08-23,Bournemouth,Wolves,1,,,FINISHED
+PL,2,2025-08-23,Brentford,Aston Villa,1,,,FINISHED
+PL,2,2025-08-23,Burnley,Sunderland,2,,,FINISHED
+PL,2,2025-08-23,Arsenal,Leeds United,5,,,FINISHED
+PL,2,2025-08-24,Crystal Palace,Nottm Forest,1,1,D,FINISHED
+PL,2,2025-08-24,Everton,Brighton,2,,,FINISHED
+PL,2,2025-08-24,Fulham,Manchester United,1,1,D,FINISHED
+PL,2,2025-08-25,Newcastle,Liverpool,2,3,A,FINISHED

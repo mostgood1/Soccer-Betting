@@ -1,0 +1,11 @@
+league,week,date,home_team,away_team,home_score,away_score,result,status
+PD,5,2025-09-19,Real Betis,Real Sociedad De Futbol,3,1,H,FINISHED
+PD,5,2025-09-20,Girona,Levante,,4,,FINISHED
+PD,5,2025-09-20,Real Madrid CF,Espanyol De Barcelona,2,,,FINISHED
+PD,5,2025-09-20,Villarreal,Osasuna,2,1,H,FINISHED
+PD,5,2025-09-20,Alaves,Sevilla FC,1,2,A,FINISHED
+PD,5,2025-09-20,Valencia CF,Athletic Club,2,,,FINISHED
+PD,5,2025-09-21,Rayo Vallecano De Madrid,RC Celta De Vigo,1,1,D,FINISHED
+PD,5,2025-09-21,Mallorca,Club Atletico De Madrid,1,1,D,FINISHED
+PD,5,2025-09-21,Elche,Real Oviedo,1,,,FINISHED
+PD,5,2025-09-21,FC Barcelona,Getafe,3,,,FINISHED

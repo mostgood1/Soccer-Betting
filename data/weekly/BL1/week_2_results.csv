@@ -1,0 +1,10 @@
+league,week,date,home_team,away_team,home_score,away_score,result,status
+BL1,2,2025-08-29,Hamburger SV,St Pauli,,2,,FINISHED
+BL1,2,2025-08-30,RB Leipzig,Heidenheim,2,,,FINISHED
+BL1,2,2025-08-30,SV Werder Bremen,Bayer 04 Leverkusen,3,3,D,FINISHED
+BL1,2,2025-08-30,VfB Stuttgart,Borussia Mönchengladbach,1,,,FINISHED
+BL1,2,2025-08-30,TSG 1899 Hoffenheim,Eintracht Frankfurt,1,3,A,FINISHED
+BL1,2,2025-08-30,FC Augsburg,Bayern Munich,2,3,A,FINISHED
+BL1,2,2025-08-31,VfL Wolfsburg,FSV Mainz,1,1,D,FINISHED
+BL1,2,2025-08-31,Borussia Dortmund,Union Berlin,3,,,FINISHED
+BL1,2,2025-08-31,1. FC Köln,SC Freiburg,4,1,H,FINISHED

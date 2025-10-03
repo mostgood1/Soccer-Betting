@@ -1,0 +1,10 @@
+league,week,date,home_team,away_team,pH,pD,pA,total_goals,pick,confidence,model_version
+FL1,2,2025-08-22,Paris Saint-Germain,Angers SCO,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-23,Olympique de Marseille,Paris FC,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-23,OGC Nice,AJ Auxerre,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-23,Olympique Lyonnais,Metz,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-24,Lorient,Stade Rennais,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-24,Le Havre,Racing Club De Lens,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-24,Toulouse,Stade Brestois,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-24,RC Strasbourg Alsace,Nantes,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+FL1,2,2025-08-24,Lille OSC,AS Monaco,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10

@@ -1,0 +1,11 @@
+league,week,date,home_team,away_team,pH,pD,pA,total_goals,pick,confidence,model_version
+PL,3,2025-08-30,Chelsea,Fulham,0.407248,0.265714,0.327038,2.68,H,0.244,v2.0.10
+PL,3,2025-08-30,Sunderland,Brentford,0.387654,0.311827,0.300519,2.478,H,0.232,v2.0.10
+PL,3,2025-08-30,Manchester United,Burnley,0.430005,0.286135,0.28386,2.342,H,0.287,v2.0.10
+PL,3,2025-08-30,Tottenham,Bournemouth,0.432777,0.299487,0.267736,2.678,H,0.283,v2.0.10
+PL,3,2025-08-30,Wolves,Everton,0.361843,0.335425,0.302731,2.425,H,0.194,v2.0.10
+PL,3,2025-08-30,Leeds United,Newcastle,0.380005,0.329458,0.290536,1.987,H,0.215,v2.0.10
+PL,3,2025-08-31,Brighton,Manchester City,0.38627,0.286502,0.327228,2.825,H,0.223,v2.0.10
+PL,3,2025-08-31,Nottm Forest,West Ham,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PL,3,2025-08-31,Liverpool,Arsenal,0.471597,0.242245,0.286158,3.248,H,0.329,v2.0.10
+PL,3,2025-08-31,Aston Villa,Crystal Palace,0.456177,0.259102,0.28472,2.552,H,0.314,v2.0.10

@@ -1,0 +1,10 @@
+league,week,date,home_team,away_team,home_score,away_score,result,status
+FL1,4,2025-09-12,Olympique de Marseille,Lorient,4,,,FINISHED
+FL1,4,2025-09-13,OGC Nice,Nantes,1,,,FINISHED
+FL1,4,2025-09-13,AJ Auxerre,AS Monaco,1,2,A,FINISHED
+FL1,4,2025-09-14,Lille OSC,Toulouse,2,1,H,FINISHED
+FL1,4,2025-09-14,Metz,Angers SCO,1,1,D,FINISHED
+FL1,4,2025-09-14,Paris Saint-Germain,Racing Club De Lens,2,,,FINISHED
+FL1,4,2025-09-14,RC Strasbourg Alsace,Le Havre,1,,,FINISHED
+FL1,4,2025-09-14,Stade Brestois,Paris FC,1,2,A,FINISHED
+FL1,4,2025-09-14,Stade Rennais,Olympique Lyonnais,3,1,H,FINISHED

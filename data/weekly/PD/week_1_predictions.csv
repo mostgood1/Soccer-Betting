@@ -1,0 +1,11 @@
+league,week,date,home_team,away_team,pH,pD,pA,total_goals,pick,confidence,model_version
+PD,1,2025-08-15,Girona,Rayo Vallecano De Madrid,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-15,Villarreal,Real Oviedo,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-16,Mallorca,FC Barcelona,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-16,Alaves,Levante,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-16,Valencia CF,Real Sociedad De Futbol,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-17,RC Celta De Vigo,Getafe,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-17,Athletic Club,Sevilla FC,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-17,Espanyol De Barcelona,Club Atletico De Madrid,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-18,Elche,Real Betis,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10
+PD,1,2025-08-19,Real Madrid CF,Osasuna,0.383,0.32245,0.29455,2.63,H,0.222,v2.0.10

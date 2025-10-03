@@ -1,0 +1,11 @@
+league,week,date,home_team,away_team,home_score,away_score,result,status
+SA,4,2025-09-19,Lecce,Cagliari,1,2,A,FINISHED
+SA,4,2025-09-20,Bologna,Genoa,2,1,H,FINISHED
+SA,4,2025-09-20,Hellas Verona,Juventus,1,1,D,FINISHED
+SA,4,2025-09-20,Udinese,AC Milan,,3,,FINISHED
+SA,4,2025-09-21,Lazio,AS Roma,,1,,FINISHED
+SA,4,2025-09-21,Torino,Atalanta,,3,,FINISHED
+SA,4,2025-09-21,Cremonese,Parma,,,,FINISHED
+SA,4,2025-09-21,Fiorentina,Como,1,2,A,FINISHED
+SA,4,2025-09-21,Inter,Sassuolo,2,1,H,FINISHED
+SA,4,2025-09-22,SSC Napoli,Pisa,3,2,H,FINISHED
