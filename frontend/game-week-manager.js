@@ -157,18 +157,52 @@ class GameWeekManager {
     async loadWeekDetails(week) {
         // Prefer the prebuilt weekly bundle; fallback to API details
         try {
-            // Try bundle
+            // Try bundle first and merge predictions/results from CSV-built artifacts
             const b1 = await fetch(`${this.apiBaseUrl}/api/weekly/bundle/${encodeURIComponent(this.league)}/${week}`);
             if (b1.ok) {
                 const bundle = await b1.json();
-                if (bundle && Array.isArray(bundle.predictions)) {
+                if (bundle && (Array.isArray(bundle.predictions) || Array.isArray(bundle.odds))) {
                     this.currentWeeklyBundle = bundle;
-                    // Convert minimal bundle to expected structure for rendering
-                    const matches = (bundle.odds || []).map(o => ({
-                        home_team: o.home_team,
-                        away_team: o.away_team,
-                        date: o.date
-                    }));
+                    // Index predictions and results by matchup for quick merge
+                    const keyer = (h, a) => `${h}__${a}`;
+                    const pIdx = {};
+                    const rIdx = {};
+                    (bundle.predictions || []).forEach(p => {
+                        if (!p) return;
+                        pIdx[keyer(p.home_team, p.away_team)] = p;
+                    });
+                    (bundle.results || []).forEach(r => {
+                        if (!r) return;
+                        rIdx[keyer(r.home_team, r.away_team)] = r;
+                    });
+                    const matches = (bundle.odds || []).map(o => {
+                        const k = keyer(o.home_team, o.away_team);
+                        const p = pIdx[k];
+                        const r = rIdx[k];
+                        // Map minimal predictions shape expected by UI
+                        const predictions = p ? {
+                            home_win_prob: (typeof p.pH === 'number') ? p.pH : undefined,
+                            draw_prob: (typeof p.pD === 'number') ? p.pD : undefined,
+                            away_win_prob: (typeof p.pA === 'number') ? p.pA : undefined,
+                            result_prediction: p.pick || undefined,
+                            confidence: (typeof p.confidence === 'number') ? p.confidence : undefined,
+                            // Optional advanced fields if present
+                            home_goals: (typeof p.home_goals === 'number') ? p.home_goals : undefined,
+                            away_goals: (typeof p.away_goals === 'number') ? p.away_goals : undefined,
+                            xg: (p.lambda_home != null || p.lambda_away != null) ? { lambda_home: p.lambda_home, lambda_away: p.lambda_away } : undefined
+                        } : null;
+                        return {
+                            home_team: o.home_team,
+                            away_team: o.away_team,
+                            date: o.date,
+                            utc_date: o.date,
+                            predictions,
+                            // Basic completion info from results if available
+                            is_completed: (r && typeof r.home_goals === 'number' && typeof r.away_goals === 'number') ? true : false,
+                            home_score: r && typeof r.home_goals === 'number' ? r.home_goals : undefined,
+                            away_score: r && typeof r.away_goals === 'number' ? r.away_goals : undefined
+                        };
+                    });
                     return { matches };
                 }
             }
