@@ -1580,22 +1580,49 @@ class GameWeekManager {
     }
     
     createPredictionSection(predictions, homeTeam, awayTeam) {
-        const hProb = (typeof predictions.home_win_prob === 'number') ? predictions.home_win_prob : (1 - (predictions.away_win_prob || 0) - (predictions.draw_prob || 0));
-        const dProb = (typeof predictions.draw_prob === 'number') ? predictions.draw_prob : 0;
-        const aProb = (typeof predictions.away_win_prob === 'number') ? predictions.away_win_prob : 0;
-        const homeProb = (hProb * 100).toFixed(1);
-        const drawProb = (dProb * 100).toFixed(1);
-        const awayProb = (aProb * 100).toFixed(1);
-        const resultPick = predictions.result_prediction || (parseFloat(homeProb) > parseFloat(awayProb) && parseFloat(homeProb) > parseFloat(drawProb) ? 'H' : (parseFloat(awayProb) > parseFloat(homeProb) && parseFloat(awayProb) > parseFloat(drawProb) ? 'A' : 'D'));
+        // Normalize inputs
+        const ph = (typeof predictions.home_win_prob === 'number') ? predictions.home_win_prob : null;
+        const pd = (typeof predictions.draw_prob === 'number') ? predictions.draw_prob : null;
+        const pa = (typeof predictions.away_win_prob === 'number') ? predictions.away_win_prob : null;
+        // Derive only if we have at least two probabilities; otherwise avoid fake 100%
+        let hProb = ph, dProb = pd, aProb = pa;
+        const known = [ph,pd,pa].filter(v => typeof v === 'number');
+        if (known.length >= 2) {
+            if (hProb == null) hProb = Math.max(0, 1 - (aProb || 0) - (dProb || 0));
+            if (dProb == null) dProb = Math.max(0, 1 - (hProb || 0) - (aProb || 0));
+            if (aProb == null) aProb = Math.max(0, 1 - (hProb || 0) - (dProb || 0));
+        } else {
+            hProb = (typeof ph === 'number') ? ph : null;
+            dProb = (typeof pd === 'number') ? pd : null;
+            aProb = (typeof pa === 'number') ? pa : null;
+        }
+        const homeProb = (typeof hProb === 'number') ? (hProb * 100).toFixed(1) : '—';
+        const drawProb = (typeof dProb === 'number') ? (dProb * 100).toFixed(1) : '—';
+        const awayProb = (typeof aProb === 'number') ? (aProb * 100).toFixed(1) : '—';
+        // Pick logic: prefer provided pick; else choose max among known if sufficient data
+        let resultPick = (predictions.result_prediction || '').toUpperCase();
+        if (!resultPick) {
+            if (known.length >= 2) {
+                const arr = [
+                    { k: 'H', v: typeof hProb === 'number' ? hProb : -1 },
+                    { k: 'D', v: typeof dProb === 'number' ? dProb : -1 },
+                    { k: 'A', v: typeof aProb === 'number' ? aProb : -1 }
+                ];
+                arr.sort((x,y) => y.v - x.v);
+                resultPick = arr[0].v >= 0 ? arr[0].k : '';
+            } else {
+                resultPick = '';
+            }
+        }
         const resultPickLabel = this.formatResultPick(resultPick, homeTeam, awayTeam);
         const xg = predictions.xg || {};
         const lambdaHome = (typeof xg.lambda_home === 'number') ? xg.lambda_home.toFixed(2) : '—';
         const lambdaAway = (typeof xg.lambda_away === 'number') ? xg.lambda_away.toFixed(2) : '—';
-        const hg = (typeof predictions.home_goals === 'number') ? predictions.home_goals.toFixed(1) : (predictions.home_goals ?? '—');
-        const ag = (typeof predictions.away_goals === 'number') ? predictions.away_goals.toFixed(1) : (predictions.away_goals ?? '—');
-        const tg = (typeof predictions.home_goals === 'number' || typeof predictions.away_goals === 'number') ? (((predictions.home_goals || 0) + (predictions.away_goals || 0)).toFixed(1)) : '—';
+        const hg = (typeof predictions.home_goals === 'number') ? predictions.home_goals.toFixed(1) : '—';
+        const ag = (typeof predictions.away_goals === 'number') ? predictions.away_goals.toFixed(1) : '—';
+        const tg = (typeof predictions.home_goals === 'number' && typeof predictions.away_goals === 'number') ? ((predictions.home_goals + predictions.away_goals).toFixed(1)) : '—';
 
-        const confPct = (typeof predictions.confidence === 'number') ? (predictions.confidence * 100).toFixed(1) + '%' : '—';
+        const confPct = (typeof predictions.confidence === 'number' && isFinite(predictions.confidence)) ? (predictions.confidence * 100).toFixed(1) + '%' : '—';
         const homeLabel = homeTeam || 'Home';
         const awayLabel = awayTeam || 'Away';
 
@@ -1605,11 +1632,11 @@ class GameWeekManager {
                     <div class="model-label"><i class="fas fa-robot"></i> Model</div>
                 </div>
                 <div class="prediction-lines">
-                    <div class="line pick">Pick: <strong>${resultPickLabel}</strong> ${confPct}</div>
+                    <div class="line pick">Pick: <strong>${resultPickLabel || '—'}</strong> ${confPct}</div>
                     <div class="line sub">xG λH ${lambdaHome} • λA ${lambdaAway}</div>
-                    <div class="line probs h">${homeLabel} ${homeProb}%</div>
-                    <div class="line probs d">Draw ${drawProb}%</div>
-                    <div class="line probs a">${awayLabel} ${awayProb}%</div>
+                    <div class="line probs h">${homeLabel} ${typeof hProb === 'number' ? (hProb*100).toFixed(1)+'%' : '—'}</div>
+                    <div class="line probs d">Draw ${typeof dProb === 'number' ? (dProb*100).toFixed(1)+'%' : '—'}</div>
+                    <div class="line probs a">${awayLabel} ${typeof aProb === 'number' ? (aProb*100).toFixed(1)+'%' : '—'}</div>
                     <div class="line metrics">${homeLabel} Goals ${hg}</div>
                     <div class="line metrics">${awayLabel} Goals ${ag}</div>
                     <div class="line metrics">Total Goals ${tg}</div>
@@ -1756,11 +1783,12 @@ class GameWeekManager {
     }
     
     getTeamLogo(teamName) {
-        // Prefer exact matches from branding; fallback to placeholder
+        // Prefer exact matches from branding
         const b = this.branding && this.branding[teamName];
         if (b && b.crest) return b.crest;
-        // Handle common short names to full names
-        const map = {
+        // Broader alias map across leagues
+        const alias = {
+            // Premier League common forms
             'Man City': 'Manchester City FC',
             'Manchester City': 'Manchester City FC',
             'Man United': 'Manchester United FC',
@@ -1768,14 +1796,30 @@ class GameWeekManager {
             'Tottenham': 'Tottenham Hotspur FC',
             'West Ham': 'West Ham United FC',
             'Newcastle': 'Newcastle United FC',
+            'Leeds': 'Leeds United FC',
             'Leeds United': 'Leeds United FC',
-            // Common Bundesliga short/canonical variants
+            'Bournemouth': 'AFC Bournemouth',
+            'Fulham': 'Fulham FC',
+            'Everton': 'Everton FC',
+            'Brighton': 'Brighton & Hove Albion FC',
+            'Nottm Forest': 'Nottingham Forest FC',
+            'Nottingham Forest': 'Nottingham Forest FC',
+            'Wolves': 'Wolverhampton Wanderers FC',
+            'Brentford': 'Brentford FC',
+            'Leicester': 'Leicester City FC',
+            'Southampton': 'Southampton FC',
+            'Ipswich': 'Ipswich Town FC',
+            'Sunderland': 'Sunderland AFC',
+            'Sheffield United': 'Sheffield United FC',
+            'Sheffield Utd': 'Sheffield United FC',
+            'Sheffield Wednesday': 'Sheffield Wednesday FC',
+            // Bundesliga
             'Bayern': 'FC Bayern München',
             'Leverkusen': 'Bayer 04 Leverkusen',
             'Dortmund': 'Borussia Dortmund',
-            'Gladbach': "Borussia Mönchengladbach",
-            'Mönchengladbach': "Borussia Mönchengladbach",
-            'Monchengladbach': "Borussia Mönchengladbach",
+            'Gladbach': 'Borussia Mönchengladbach',
+            'Mönchengladbach': 'Borussia Mönchengladbach',
+            'Monchengladbach': 'Borussia Mönchengladbach',
             'Köln': '1. FC Köln',
             'Koln': '1. FC Köln',
             'Frankfurt': 'Eintracht Frankfurt',
@@ -1788,13 +1832,48 @@ class GameWeekManager {
             'Union Berlin': '1. FC Union Berlin',
             'Augsburg': 'FC Augsburg',
             'Mainz': '1. FSV Mainz 05',
-            'Bremen': 'SV Werder Bremen'
+            'Bremen': 'SV Werder Bremen',
+            // La Liga common forms
+            'Atletico Madrid': 'Atlético de Madrid',
+            'Athletic Bilbao': 'Athletic Club',
+            'Real Betis': 'Real Betis Balompié',
+            'Celta Vigo': 'RC Celta de Vigo',
+            'Deportivo Alaves': 'Deportivo Alavés',
+            'Real Sociedad': 'Real Sociedad de Fútbol',
+            'Mallorca': 'RCD Mallorca',
+            // Serie A
+            'Inter': 'FC Internazionale Milano',
+            'AC Milan': 'AC Milan',
+            'AS Roma': 'AS Roma',
+            'Lazio': 'SS Lazio',
+            'Napoli': 'SSC Napoli',
+            'Fiorentina': 'ACF Fiorentina',
+            'Verona': 'Hellas Verona FC',
+            'Udinese': 'Udinese Calcio',
+            'Monza': 'AC Monza'
         };
-        const full = map[teamName];
+        const full = alias[teamName];
         if (full && this.branding && this.branding[full]?.crest) return this.branding[full].crest;
-        // Try case-insensitive lookup
+        // Try case-insensitive direct match
         const tryLower = teamName && this.branding && Object.keys(this.branding).find(n => n.toLowerCase() === teamName.toLowerCase());
         if (tryLower && this.branding[tryLower]?.crest) return this.branding[tryLower].crest;
+        // Normalized fuzzy match: strip diacritics/punct and common suffixes (fc, afc, cf)
+        const norm = (s) => (s || '')
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/&/g,' and ')
+            .replace(/[^a-z0-9 ]/gi,' ')
+            .replace(/\b(f\.?c\.?|a\.?f\.?c\.?|c\.?f\.?|s\.?c\.?)\b/gi,'')
+            .replace(/\s+/g,' ')
+            .trim()
+            .toLowerCase();
+        const keyN = norm(teamName);
+        if (this.branding) {
+            const hit = Object.keys(this.branding).find(k => norm(k) === keyN);
+            if (hit && this.branding[hit]?.crest) return this.branding[hit].crest;
+            const contains = Object.keys(this.branding).find(k => norm(k).includes(keyN) || keyN.includes(norm(k)));
+            if (contains && this.branding[contains]?.crest) return this.branding[contains].crest;
+        }
+        // Final placeholder
         return 'https://via.placeholder.com/32x32/cccccc/666666?text=' + (teamName?.charAt(0) || '?');
     }
     

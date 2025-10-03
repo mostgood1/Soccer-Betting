@@ -273,8 +273,96 @@ class AllMatchesManager {
 
   getTeamLogo(name) {
     if (!name) return '/placeholder.png';
+    // Exact hit first
     const rec = this.brandingAll[name];
-    return (rec && rec.crest) ? rec.crest : '/placeholder.png';
+    if (rec && rec.crest) return rec.crest;
+    // Common aliases across leagues
+    const alias = {
+      // PL
+      'Man City': 'Manchester City FC',
+      'Manchester City': 'Manchester City FC',
+      'Man United': 'Manchester United FC',
+      'Manchester United': 'Manchester United FC',
+      'Tottenham': 'Tottenham Hotspur FC',
+      'West Ham': 'West Ham United FC',
+      'Newcastle': 'Newcastle United FC',
+      'Leeds': 'Leeds United FC',
+      'Leeds United': 'Leeds United FC',
+      'Bournemouth': 'AFC Bournemouth',
+      'Fulham': 'Fulham FC',
+      'Everton': 'Everton FC',
+      'Brighton': 'Brighton & Hove Albion FC',
+      'Nottm Forest': 'Nottingham Forest FC',
+      'Nottingham Forest': 'Nottingham Forest FC',
+      'Wolves': 'Wolverhampton Wanderers FC',
+      'Brentford': 'Brentford FC',
+      'Leicester': 'Leicester City FC',
+      'Southampton': 'Southampton FC',
+      'Ipswich': 'Ipswich Town FC',
+      'Sunderland': 'Sunderland AFC',
+      'Sheffield United': 'Sheffield United FC',
+      'Sheffield Utd': 'Sheffield United FC',
+      'Sheffield Wednesday': 'Sheffield Wednesday FC',
+      // BL1
+      'Bayern': 'FC Bayern München',
+      'Leverkusen': 'Bayer 04 Leverkusen',
+      'Dortmund': 'Borussia Dortmund',
+      'Gladbach': 'Borussia Mönchengladbach',
+      'Mönchengladbach': 'Borussia Mönchengladbach',
+      'Monchengladbach': 'Borussia Mönchengladbach',
+      'Köln': '1. FC Köln',
+      'Koln': '1. FC Köln',
+      'Frankfurt': 'Eintracht Frankfurt',
+      'Hoffenheim': 'TSG 1899 Hoffenheim',
+      'Stuttgart': 'VfB Stuttgart',
+      'Wolfsburg': 'VfL Wolfsburg',
+      'Leipzig': 'RB Leipzig',
+      'Bochum': 'VfL Bochum 1848',
+      'Heidenheim': '1. FC Heidenheim 1846',
+      'Union Berlin': '1. FC Union Berlin',
+      'Augsburg': 'FC Augsburg',
+      'Mainz': '1. FSV Mainz 05',
+      'Bremen': 'SV Werder Bremen',
+      // La Liga
+      'Atletico Madrid': 'Atlético de Madrid',
+      'Athletic Bilbao': 'Athletic Club',
+      'Real Betis': 'Real Betis Balompié',
+      'Celta Vigo': 'RC Celta de Vigo',
+      'Deportivo Alaves': 'Deportivo Alavés',
+      'Real Sociedad': 'Real Sociedad de Fútbol',
+      'Mallorca': 'RCD Mallorca',
+      // Serie A
+      'Inter': 'FC Internazionale Milano',
+      'AC Milan': 'AC Milan',
+      'AS Roma': 'AS Roma',
+      'Lazio': 'SS Lazio',
+      'Napoli': 'SSC Napoli',
+      'Fiorentina': 'ACF Fiorentina',
+      'Verona': 'Hellas Verona FC',
+      'Udinese': 'Udinese Calcio',
+      'Monza': 'AC Monza'
+    };
+    const full = alias[name];
+    if (full && this.brandingAll[full]?.crest) return this.brandingAll[full].crest;
+    // Case-insensitive direct match
+    const lower = name.toLowerCase();
+    const direct = Object.keys(this.brandingAll).find(k => k.toLowerCase() === lower);
+    if (direct && this.brandingAll[direct]?.crest) return this.brandingAll[direct].crest;
+    // Normalized fuzzy match
+    const norm = (s) => (s || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/&/g,' and ')
+      .replace(/[^a-z0-9 ]/gi,' ')
+      .replace(/\b(f\.?c\.?|a\.?f\.?c\.?|c\.?f\.?|s\.?c\.?)\b/gi,'')
+      .replace(/\s+/g,' ')
+      .trim()
+      .toLowerCase();
+    const keyN = norm(name);
+    const hit = Object.keys(this.brandingAll).find(k => norm(k) === keyN);
+    if (hit && this.brandingAll[hit]?.crest) return this.brandingAll[hit].crest;
+    const contains = Object.keys(this.brandingAll).find(k => norm(k).includes(keyN) || keyN.includes(norm(k)));
+    if (contains && this.brandingAll[contains]?.crest) return this.brandingAll[contains].crest;
+    return '/placeholder.png';
   }
 
   fmtAmerican(odd) {
@@ -286,7 +374,12 @@ class AllMatchesManager {
 
   formatLocalDateParts(isoLike) {
     try {
-      const d = isoLike ? new Date(isoLike) : null;
+      let src = isoLike;
+      // If the string looks like an ISO without timezone (naive), treat it as UTC to avoid local-time drift
+      if (typeof src === 'string' && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(src) && !(/[zZ]|[\+\-]\d{2}:?\d{2}$/.test(src))) {
+        src = src + 'Z';
+      }
+      const d = src ? new Date(src) : null;
       if (!d || isNaN(d.getTime())) return { date: '—', time: '—', long: '—' };
       const locale = (navigator && navigator.language) ? navigator.language : 'en-US';
       const dateFmt = new Intl.DateTimeFormat(locale, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
