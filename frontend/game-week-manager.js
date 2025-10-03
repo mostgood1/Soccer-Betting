@@ -415,8 +415,9 @@ class GameWeekManager {
         if (!cardsContainer) return;
         
         cardsContainer.innerHTML = '<div class="loading">Loading game cards...</div>';
-        
+        const weekAtStart = this.currentWeek;
     let weekData = await this.loadWeekDetails(this.currentWeek);
+    if (this.currentWeek !== weekAtStart) { return; }
     // Fallbacks: if empty, retry with PL, then with ALL to avoid user-facing blanks on hosted envs
     try {
         if (!weekData || !Array.isArray(weekData.matches) || weekData.matches.length === 0) {
@@ -465,10 +466,13 @@ class GameWeekManager {
         }
         
         // Save details for per-week performance rendering
+        if (this.currentWeek !== weekAtStart) { return; }
         this.currentWeekDetails = weekData;
         const cards = weekData.matches.map(match => this.createGameCard(match)).join('');
+            if (this.currentWeek !== weekAtStart) { return; }
             cardsContainer.innerHTML = cards;
             // Patch any sections if data already loaded
+            if (this.currentWeek !== weekAtStart) { return; }
             this.patchCardsWithOdds();
             this.patchCardsWithTotals();
             this.patchCardsWithBTTS();
@@ -480,6 +484,7 @@ class GameWeekManager {
             // Load and render book odds (American)
             try {
                 await this.loadWeekOdds(this.currentWeek);
+                if (this.currentWeek !== weekAtStart) { return; }
                 this.patchCardsWithBookOdds();
             } catch (e) {
                 console.warn('Week odds unavailable:', e.message || e);
