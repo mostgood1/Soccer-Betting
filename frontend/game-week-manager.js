@@ -416,7 +416,40 @@ class GameWeekManager {
         
         cardsContainer.innerHTML = '<div class="loading">Loading game cards...</div>';
         
-    const weekData = await this.loadWeekDetails(this.currentWeek);
+    let weekData = await this.loadWeekDetails(this.currentWeek);
+    // Fallbacks: if empty, retry with PL, then with ALL to avoid user-facing blanks on hosted envs
+    try {
+        if (!weekData || !Array.isArray(weekData.matches) || weekData.matches.length === 0) {
+            // First fallback: force PL
+            const controller1 = new AbortController();
+            const t1 = setTimeout(() => controller1.abort(), 12000);
+            const r1 = await fetch(`${this.apiBaseUrl}/api/game-weeks/${this.currentWeek}?league=PL`, { signal: controller1.signal });
+            clearTimeout(t1);
+            if (r1.ok) {
+                const d1 = await r1.json();
+                if (d1 && Array.isArray(d1.matches) && d1.matches.length > 0) {
+                    weekData = d1;
+                    this.league = 'PL';
+                }
+            }
+        }
+        if (!weekData || !Array.isArray(weekData.matches) || weekData.matches.length === 0) {
+            // Second fallback: ALL (server generally defaults to PL)
+            const controller2 = new AbortController();
+            const t2 = setTimeout(() => controller2.abort(), 12000);
+            const r2 = await fetch(`${this.apiBaseUrl}/api/game-weeks/${this.currentWeek}?league=ALL`, { signal: controller2.signal });
+            clearTimeout(t2);
+            if (r2.ok) {
+                const d2 = await r2.json();
+                if (d2 && Array.isArray(d2.matches) && d2.matches.length > 0) {
+                    weekData = d2;
+                    // keep current league selection unchanged for UI, but use data for rendering
+                }
+            }
+        }
+    } catch (fallbackErr) {
+        console.warn('Week details fallback failed:', fallbackErr?.message || fallbackErr);
+    }
     // Fetch comparisons in parallel (after base week data)
         this.loadOddsComparison(this.currentWeek);
         this.loadCornersComparison(this.currentWeek);
