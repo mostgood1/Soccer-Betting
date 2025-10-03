@@ -750,12 +750,13 @@ class GameWeekManager {
             }
         }
 
-        // 3) If still empty on first load, try a one-time hydrate: refresh Bovada snapshots and clear week cache, then retry cache-only
+        // 3) If still empty on first load, try a one-time hydrate: refresh Bovada snapshots, write CSVs, clear week cache, then retry cache-only
         if ((!this.weekOdds || this.weekOdds.length === 0) && !this._hydratedWeekOddsOnce) {
             this._hydratedWeekOddsOnce = true;
             try {
-                // Fire-and-forget admin refresh (no auth required)
+                // Fire-and-forget admin refresh (no auth required) and persist to CSV for durability
                 await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
+                await fetch(`${this.apiBaseUrl}/api/admin/odds/snapshot-csv/quick`, { method: 'POST' });
                 // Clear server-side week odds TTL cache
                 await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
                 // Retry cache-only quickly
@@ -796,15 +797,16 @@ class GameWeekManager {
                 el.textContent = 'status unavailable';
             }
         } catch { el.textContent = 'status unavailable'; }
-        // Retry button triggers quick hydrate
+        // Retry button triggers quick hydrate (refresh -> CSV snapshot -> clear cache -> reload odds)
         btn.onclick = async () => {
             btn.disabled = true; btn.textContent = 'Hydrating…';
             try {
                 await fetch(`${this.apiBaseUrl}/api/admin/bovada/refresh`, { method: 'POST' });
+                await fetch(`${this.apiBaseUrl}/api/admin/odds/snapshot-csv/quick`, { method: 'POST' });
                 await fetch(`${this.apiBaseUrl}/api/admin/week-odds-cache/clear`, { method: 'POST' });
                 await this.loadWeekOdds(this.currentWeek);
                 this.patchCardsWithBookOdds();
-                el.textContent = 'hydrated just now';
+                el.textContent = 'hydrated just now (csv)';
             } catch (e) {
                 el.textContent = 'hydrate failed';
             } finally {
