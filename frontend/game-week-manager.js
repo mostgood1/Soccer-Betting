@@ -185,11 +185,12 @@ class GameWeekManager {
                     (bundle.odds || []).forEach(o => {
                         if (!o) return;
                         const k = keyer(o.home_team, o.away_team);
+                        const utcKick = o.utc_kickoff || null;
                         baseMap.set(k, {
                             home_team: o.home_team,
                             away_team: o.away_team,
                             date: o.date,
-                            utc_date: o.date,
+                            utc_date: utcKick || o.date,
                         });
                     });
                     // Seed from predictions (if odds missing)
@@ -197,11 +198,12 @@ class GameWeekManager {
                         if (!p) return;
                         const k = keyer(p.home_team, p.away_team);
                         if (!baseMap.has(k)) {
+                            const utcKick = p.utc_kickoff || null;
                             baseMap.set(k, {
                                 home_team: p.home_team,
                                 away_team: p.away_team,
                                 date: p.date,
-                                utc_date: p.date,
+                                utc_date: utcKick || p.date,
                             });
                         }
                     });
@@ -250,8 +252,8 @@ class GameWeekManager {
                         // Build matches from union of odds/predictions as above
                         const keyer = (h, a) => `${h}__${a}`;
                         const baseMap = new Map();
-                        (bundle.odds || []).forEach(o => { if (o) baseMap.set(keyer(o.home_team,o.away_team), { home_team:o.home_team, away_team:o.away_team, date:o.date, utc_date:o.date }); });
-                        (bundle.predictions || []).forEach(p => { if (p) { const k = keyer(p.home_team,p.away_team); if (!baseMap.has(k)) baseMap.set(k, { home_team:p.home_team, away_team:p.away_team, date:p.date, utc_date:p.date }); } });
+                        (bundle.odds || []).forEach(o => { if (o) { const utcKick = o.utc_kickoff || null; baseMap.set(keyer(o.home_team,o.away_team), { home_team:o.home_team, away_team:o.away_team, date:o.date, utc_date: utcKick || o.date }); } });
+                        (bundle.predictions || []).forEach(p => { if (p) { const k = keyer(p.home_team,p.away_team); if (!baseMap.has(k)) { const utcKick = p.utc_kickoff || null; baseMap.set(k, { home_team:p.home_team, away_team:p.away_team, date:p.date, utc_date: utcKick || p.date }); } } });
                         const matches = Array.from(baseMap.values());
                         if (matches.length) return { matches };
                     }
