@@ -34,6 +34,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from datetime import datetime, timedelta
 import os
 from .corners_actuals_service import corners_actuals_store
+from .team_name_normalizer import normalize_team_name
 
 
 BASE_DIR = Path("data/odds_history")
@@ -1329,23 +1330,37 @@ def load_h2h_index_from_csv(
     except Exception:
         return {}
     # aggregate
-    grouped: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    # Group by (date, normalized_home|normalized_away) so lookups using normalized
+    # names (used elsewhere in the codebase) will succeed even if CSV rows used
+    # slightly different variants. Track alias keys (raw and normalized) to emit
+    # a robust index mapping multiple keys to the same consensus record.
+    grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for rec in rows:
         league_rec = (rec.get("league") or "").upper()
         if league_rec != (league or "PL").upper():
             continue
         date = rec.get("match_date") or ""
-        home = rec.get("home_team") or ""
-        away = rec.get("away_team") or ""
-        key = (date, home, away)
+        home_raw = rec.get("home_team") or ""
+        away_raw = rec.get("away_team") or ""
+        # Normalize team names for consistent grouping
+        home = normalize_team_name(home_raw) or home_raw
+        away = normalize_team_name(away_raw) or away_raw
+        base_norm = f"{home.lower()}|{away.lower()}"
+        key = (date, base_norm)
         g = grouped.setdefault(
             key,
             {
                 "prob_samples": {"H": [], "D": [], "A": []},
                 "over_samples": [],
                 "preferred": None,
+                "aliases": set(),  # store alternative base keys (raw + normalized)
             },
         )
+        # Record aliases for this grouped match
+        g["aliases"].add(base_norm)
+        base_raw = f"{home_raw.lower()}|{away_raw.lower()}"
+        if base_raw:
+            g["aliases"].add(base_raw)
         outcome = rec.get("outcome")
         try:
             prob = float(rec.get("implied_prob")) if rec.get("implied_prob") else None
@@ -1378,7 +1393,7 @@ def load_h2h_index_from_csv(
     out_idx: Dict[str, Dict[str, Any]] = {}
     from statistics import median
 
-    for (date, home, away), g in grouped.items():
+    for (date, base_norm), g in grouped.items():
         cons = {k: (median(vs) if vs else None) for k, vs in g["prob_samples"].items()}
         over_c = median(g["over_samples"]) if g["over_samples"] else None
         rec = {
@@ -1388,7 +1403,9 @@ def load_h2h_index_from_csv(
         if g.get("preferred_decimals"):
             rec["preferred_bookmaker"] = g.get("preferred")
             rec["preferred_decimals"] = g.get("preferred_decimals")
-        key_basic = f"{home.lower()}|{away.lower()}"
-        out_idx[f"{date}|{key_basic}"] = rec
-        out_idx[key_basic] = rec
+        # Emit index entries for all alias keys (both date-qualified and base)
+        aliases = g.get("aliases") or {base_norm}
+        for base in aliases:
+            out_idx[f"{date}|{base}"] = rec
+            out_idx[base] = rec
     return out_idx
