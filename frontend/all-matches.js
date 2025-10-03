@@ -82,7 +82,12 @@ class AllMatchesManager {
       let groups = Array.isArray(data.groups) ? data.groups : [];
       if (this.onlyToday && groups.length) {
         const todayUtc = new Date().toISOString().slice(0,10);
+        // First, restrict to the server's "today" grouping by UTC
         groups = groups.filter(g => (g.date || '').slice(0,10) === todayUtc);
+        // Then, additionally prune each group's matches to the viewer's LOCAL calendar day
+        // so that the Friday-only view doesn't include local Saturday kickoffs.
+        const todayLocalKey = this._localDateKeyFromDate(new Date());
+        groups = this._pruneGroupsToLocalDay(groups, todayLocalKey);
       }
       // UX fallback: if no matches today, auto-show the nearest upcoming match day within 7 days
       if ((!groups || groups.length === 0) && this.onlyToday) {
@@ -95,8 +100,19 @@ class AllMatchesManager {
             if (g2.length) {
               // pick earliest date
               g2.sort((a,b) => (a.date||'').localeCompare(b.date||''));
-              this.groups = [g2[0]];
-              this.fallbackInfo = { type: 'next-day', date: g2[0].date };
+              let nextGroup = { ...g2[0] };
+              // Determine target local date key based on earliest match's local day if available
+              const firstMatch = (nextGroup.matches || [])[0] || null;
+              const targetLocalKey = firstMatch ? this._localDateKeyFromISO(firstMatch.utc_date || firstMatch.date) : this._localDateKeyFromISO(nextGroup.date);
+              // Prune the group's matches to the target local day
+              nextGroup.matches = (nextGroup.matches || []).filter(m => this._localDateKeyFromISO(m.utc_date || m.date) === targetLocalKey);
+              // If pruning removed everything (edge case), fall back to original matches
+              if (!nextGroup.matches.length) nextGroup = { ...g2[0] };
+              // Align the group's displayed date with the local day we selected
+              nextGroup.date = this._isoFromLocalKey(targetLocalKey) || nextGroup.date;
+              this.groups = [nextGroup];
+              // Use a local-facing date for the banner
+              this.fallbackInfo = { type: 'next-day', date: this._isoFromLocalKey(targetLocalKey) };
               return;
             }
           }
@@ -110,7 +126,8 @@ class AllMatchesManager {
         const leagues = this.filterLeague && this.filterLeague !== 'ALL' ? [this.filterLeague] : ['PL','BL1','FL1','SA','PD'];
         const perGroups = await this.loadGroupsPerLeague(leagues);
         if (perGroups && perGroups.length) {
-          this.groups = perGroups;
+          // When showing only today, prune to local day too
+          this.groups = this.onlyToday ? this._pruneGroupsToLocalDay(perGroups, this._localDateKeyFromDate(new Date())) : perGroups;
           return;
         }
       } catch (e2) {
@@ -499,6 +516,47 @@ class AllMatchesManager {
         });
       }
     } catch {}
+  }
+
+  // Helpers: local day pruning and date keys
+  _localDateKeyFromISO(isoLike) {
+    try {
+      const d = isoLike ? new Date(isoLike) : null;
+      if (!d || isNaN(d.getTime())) return null;
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const da = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${da}`;
+    } catch { return null; }
+  }
+
+  _localDateKeyFromDate(d) {
+    try {
+      if (!d || isNaN(d.getTime())) return null;
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const da = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${da}`;
+    } catch { return null; }
+  }
+
+  _isoFromLocalKey(key) {
+    // Construct an ISO-like string at local midnight to pass to formatter
+    // Note: This is only for display in the banner via formatLocalDateParts
+    try { return key ? `${key}T00:00:00` : null; } catch { return null; }
+  }
+
+  _pruneGroupsToLocalDay(groups, targetLocalKey) {
+    try {
+      const pruned = [];
+      for (const g of (groups || [])) {
+        const gKey = targetLocalKey || this._localDateKeyFromISO(g.date);
+        if (!gKey) continue;
+        const kept = (g.matches || []).filter(m => this._localDateKeyFromISO(m.utc_date || m.date) === gKey);
+        if (kept.length) pruned.push({ ...g, date: this._isoFromLocalKey(gKey) || g.date, matches: kept });
+      }
+      return pruned;
+    } catch { return groups || []; }
   }
 }
 
