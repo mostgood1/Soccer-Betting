@@ -1,0 +1,10 @@
+league,week,date,home_team,away_team,dec_H,dec_D,dec_A,imp_H,imp_D,imp_A,source
+FL1,7,2025-10-03,Paris FC,Lorient,,,,,,,csv-historic
+FL1,7,2025-10-04,Metz,Olympique de Marseille,,,,,,,missing
+FL1,7,2025-10-04,Stade Brestois,Nantes,,,,,,,missing
+FL1,7,2025-10-04,AJ Auxerre,Racing Club De Lens,,,,,,,missing
+FL1,7,2025-10-05,Olympique Lyonnais,Toulouse,,,,,,,missing
+FL1,7,2025-10-05,RC Strasbourg Alsace,Angers SCO,,,,,,,missing
+FL1,7,2025-10-05,Le Havre,Stade Rennais,,,,,,,missing
+FL1,7,2025-10-05,AS Monaco,OGC Nice,,,,,,,missing
+FL1,7,2025-10-05,Lille OSC,Paris Saint-Germain,,,,,,,missing

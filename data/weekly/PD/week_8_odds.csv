@@ -1,0 +1,11 @@
+league,week,date,home_team,away_team,dec_H,dec_D,dec_A,imp_H,imp_D,imp_A,source
+PD,8,2025-10-03,Osasuna,Getafe,2.25,3.05,4.37,0.443736,0.327446,0.228818,csv-historic
+PD,8,2025-10-04,Real Oviedo,Levante,2.63,3.48,3.0,0.37954,0.28753,0.33293,csv-historic
+PD,8,2025-10-04,Girona,Valencia CF,,,,,,,missing
+PD,8,2025-10-04,Athletic Club,Mallorca,,,,,,,missing
+PD,8,2025-10-04,Real Madrid CF,Villarreal,,,,,,,missing
+PD,8,2025-10-05,Alaves,Elche,,,,,,,missing
+PD,8,2025-10-05,Sevilla FC,FC Barcelona,,,,,,,missing
+PD,8,2025-10-05,Espanyol De Barcelona,Real Betis,,,,,,,missing
+PD,8,2025-10-05,Real Sociedad De Futbol,Rayo Vallecano De Madrid,,,,,,,missing
+PD,8,2025-10-05,RC Celta De Vigo,Club Atletico De Madrid,,,,,,,missing

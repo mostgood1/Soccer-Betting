@@ -3385,6 +3385,52 @@ def api_admin_ensure_full_coverage(
         raise HTTPException(status_code=500, detail=f"Ensure full coverage failed: {e}")
 
 
+# -------------------------------------------------------------
+# Weekly per-league artifacts (odds/predictions/results) and bundle
+# -------------------------------------------------------------
+
+
+@app.post("/api/admin/weekly/write")
+def api_admin_weekly_write(
+    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD)"),
+    week: int = Query(..., ge=1, le=38),
+    include: Optional[str] = Query(None, description='Comma list subset of ["odds","predictions","results"]'),
+):
+    """Generate per-league weekly CSVs and a bundle JSON for the frontend.
+
+    Writes to data/weekly/{LEAGUE}/week_{W}_*.csv and week_{W}_bundle.json
+    """
+    try:
+        from .services.weekly_files_service import write_all_weekly
+
+        lg = (league or "PL").upper()
+        parts = [s.strip() for s in (include or "").split(",") if s.strip()] or None
+        res = write_all_weekly(lg, int(week), include=parts)
+        return {"success": True, **res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Weekly write failed: {e}")
+
+
+@app.get("/api/weekly/bundle/{league}/{week}")
+def api_get_weekly_bundle(league: str, week: int):
+    """Return the weekly bundle JSON, building it from CSVs if missing."""
+    from pathlib import Path as _P
+    try:
+        from .services.weekly_files_service import _weekly_paths, build_weekly_bundle
+
+        lg = (league or "PL").upper()
+        paths = _weekly_paths(lg, int(week))
+        if not paths["bundle"].exists():
+            # Build from existing CSVs (or create empty scaffold)
+            build_weekly_bundle(lg, int(week))
+        if not paths["bundle"].exists():
+            return {"league": lg, "week": int(week), "odds": [], "predictions": [], "results": []}
+        payload = json.loads(paths["bundle"].read_text(encoding="utf-8"))
+        return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Weekly bundle failed: {e}")
+
+
 # Quick path: write odds CSVs without auth (UI-triggered, local/dev convenience)
 @app.post("/api/admin/odds/snapshot-csv/quick")
 def api_admin_odds_snapshot_csv_quick(

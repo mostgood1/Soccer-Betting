@@ -155,6 +155,24 @@ class GameWeekManager {
     }
     
     async loadWeekDetails(week) {
+        // Prefer the prebuilt weekly bundle; fallback to API details
+        try {
+            // Try bundle
+            const b1 = await fetch(`${this.apiBaseUrl}/api/weekly/bundle/${encodeURIComponent(this.league)}/${week}`);
+            if (b1.ok) {
+                const bundle = await b1.json();
+                if (bundle && Array.isArray(bundle.predictions)) {
+                    this.currentWeeklyBundle = bundle;
+                    // Convert minimal bundle to expected structure for rendering
+                    const matches = (bundle.odds || []).map(o => ({
+                        home_team: o.home_team,
+                        away_team: o.away_team,
+                        date: o.date
+                    }));
+                    return { matches };
+                }
+            }
+        } catch {}
         try {
             console.log(`📊 Loading details for week ${week}...`);
             const controller = new AbortController();
@@ -162,8 +180,20 @@ class GameWeekManager {
             const response = await fetch(`${this.apiBaseUrl}/api/game-weeks/${week}?league=${encodeURIComponent(this.league)}`, { signal: controller.signal });
             clearTimeout(t);
             if (!response.ok) throw new Error(`Failed to load week ${week} details`);
-            
             const data = await response.json();
+            // If API returns empty, attempt to generate weekly files and retry bundle once
+            if (!data || !Array.isArray(data.matches) || data.matches.length === 0) {
+                try {
+                    await fetch(`${this.apiBaseUrl}/api/admin/weekly/write?league=${encodeURIComponent(this.league)}&week=${week}`, { method: 'POST' });
+                    const b2 = await fetch(`${this.apiBaseUrl}/api/weekly/bundle/${encodeURIComponent(this.league)}/${week}`);
+                    if (b2.ok) {
+                        const bundle = await b2.json();
+                        this.currentWeeklyBundle = bundle;
+                        const matches = (bundle.odds || []).map(o => ({ home_team: o.home_team, away_team: o.away_team, date: o.date }));
+                        return { matches };
+                    }
+                } catch {}
+            }
             return data;
         } catch (error) {
             console.error(`❌ Error loading week ${week}:`, error);
@@ -811,12 +841,30 @@ class GameWeekManager {
             const el = document.querySelector(`.sb-market-odds[data-home="${CSS.escape(m.home_team)}"][data-away="${CSS.escape(m.away_team)}"]`);
             if (!el) continue;
             const row = this.findWeekOddsRow(m);
-            if (!row || !row.odds || !row.odds.market_odds) continue;
-            const mw = row.odds.market_odds.match_winner || {};
-            const h = this.fmtAmerican(mw.home?.odds_american);
-            const d = this.fmtAmerican(mw.draw?.odds_american);
-            const a = this.fmtAmerican(mw.away?.odds_american);
-            el.textContent = `Odds: H ${h} | D ${d} | A ${a}`;
+            if (row && row.odds && row.odds.market_odds) {
+                const mw = row.odds.market_odds.match_winner || {};
+                const h = this.fmtAmerican(mw.home?.odds_american);
+                const d = this.fmtAmerican(mw.draw?.odds_american);
+                const a = this.fmtAmerican(mw.away?.odds_american);
+                el.textContent = `Odds: H ${h} | D ${d} | A ${a}`;
+                continue;
+            }
+            // Fallback: use weekly bundle decimals if present
+            try {
+                const bundle = this.currentWeeklyBundle;
+                if (bundle && Array.isArray(bundle.odds)) {
+                    const o = bundle.odds.find(x => x.home_team === m.home_team && x.away_team === m.away_team);
+                    if (o) {
+                        const hDec = Number(o.dec_H);
+                        const dDec = Number(o.dec_D);
+                        const aDec = Number(o.dec_A);
+                        const h = this.fmtAmerican(this.decimalToAmerican(hDec));
+                        const d = this.fmtAmerican(this.decimalToAmerican(dDec));
+                        const a = this.fmtAmerican(this.decimalToAmerican(aDec));
+                        el.textContent = `Odds: H ${h} | D ${d} | A ${a}`;
+                    }
+                }
+            } catch {}
         }
     }
 
