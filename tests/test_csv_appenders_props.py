@@ -39,10 +39,18 @@ def test_extended_market_appenders_write_csvs(monkeypatch, tmp_path: Path):
         "totals": [{"line": 2.5, "over_prob": 0.51, "under_prob": 0.49}],
         "first_half_totals": [{"line": 1.0, "over_prob": 0.55, "under_prob": 0.45}],
         "second_half_totals": [{"line": 1.5, "over_prob": 0.5, "under_prob": 0.5}],
-        "team_totals": [{"side": "home", "line": 1.5, "over_prob": 0.52, "under_prob": 0.48}],
+        "team_totals": [
+            {"side": "home", "line": 1.5, "over_prob": 0.52, "under_prob": 0.48}
+        ],
         "corners_totals": [{"line": 9.5, "over_prob": 0.52, "under_prob": 0.48}],
-        "team_corners": [{"side": "away", "line": 4.5, "over_prob": 0.5, "under_prob": 0.5}],
-        "double_chance": {"1X": {"prob": 0.7}, "X2": {"prob": 0.65}, "12": {"prob": 0.8}},
+        "team_corners": [
+            {"side": "away", "line": 4.5, "over_prob": 0.5, "under_prob": 0.5}
+        ],
+        "double_chance": {
+            "1X": {"prob": 0.7},
+            "X2": {"prob": 0.65},
+            "12": {"prob": 0.8},
+        },
         "draw_no_bet": {"home_prob": 0.6, "away_prob": 0.4},
         "asian_handicap": [{"line": -0.5, "home_prob": 0.55, "away_prob": 0.45}],
         "cards_totals": [{"line": 3.5, "over_prob": 0.5, "under_prob": 0.5}],
@@ -65,7 +73,9 @@ def test_extended_market_appenders_write_csvs(monkeypatch, tmp_path: Path):
     total += store.append_cards_totals_from_bovada(league, [ev], week=7)
     total += store.append_corners_handicap_from_bovada(league, [ev], week=7)
 
-    assert total >= 3 + 2 + 2 + 2 + 2 + 2 + 2 + 3 + 2 + 2 + 2 + 2  # h2h + btts + many OU/dc/dnb/ah/cards/corners
+    assert (
+        total >= 3 + 2 + 2 + 2 + 2 + 2 + 2 + 3 + 2 + 2 + 2 + 2
+    )  # h2h + btts + many OU/dc/dnb/ah/cards/corners
 
     # Verify files exist and have rows
     def p(market: str) -> Path:
@@ -91,4 +101,6 @@ def test_extended_market_appenders_write_csvs(monkeypatch, tmp_path: Path):
         path = p(market)
         assert path.exists(), f"CSV not created: {path}"
         rows = _count_rows(path)
-        assert rows >= min_rows, f"Expected at least {min_rows} rows in {path}, got {rows}"
+        assert (
+            rows >= min_rows
+        ), f"Expected at least {min_rows} rows in {path}, got {rows}"

@@ -28,7 +28,9 @@ def summarize_week(base: str, league: str, week: int):
             "FINISHED",
             "COMPLETED",
         )
-        if is_completed and (m.get("home_score") is not None and m.get("away_score") is not None):
+        if is_completed and (
+            m.get("home_score") is not None and m.get("away_score") is not None
+        ):
             completed_with_scores += 1
     odds_rows = 0
     odds_with_totals = 0
@@ -46,12 +48,14 @@ def summarize_week(base: str, league: str, week: int):
         if not has_any or not has_totals:
             odds_missing_any_or_totals += 1
             if len(sample_missing) < 3:
-                sample_missing.append({
-                    "home": row.get("home_team"),
-                    "away": row.get("away_team"),
-                    "has_any": has_any,
-                    "has_totals": has_totals,
-                })
+                sample_missing.append(
+                    {
+                        "home": row.get("home_team"),
+                        "away": row.get("away_team"),
+                        "has_any": has_any,
+                        "has_totals": has_totals,
+                    }
+                )
     recs = (r or {}).get("reconciliations") or []
     rec_count = len(recs)
     return {
@@ -79,7 +83,11 @@ def main():
     out = []
     for wk in range(args.start, args.end + 1):
         out.append(summarize_week(args.base, args.league, wk))
-    print(json.dumps({"league": args.league, "base": args.base, "coverage": out}, indent=2))
+    print(
+        json.dumps(
+            {"league": args.league, "base": args.base, "coverage": out}, indent=2
+        )
+    )
 
 
 if __name__ == "__main__":

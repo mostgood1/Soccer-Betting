@@ -43,7 +43,11 @@ def test_week_odds_uses_csv_fallback(monkeypatch, tmp_path: Path):
         # Patch get_league_service so the API uses our dummy service
         import app.main as main_mod
 
-        monkeypatch.setattr(main_mod, "get_league_service", lambda league=None: DummyLeagueService(matches))
+        monkeypatch.setattr(
+            main_mod,
+            "get_league_service",
+            lambda league=None: DummyLeagueService(matches),
+        )
 
         # Write a matching H2H CSV row via helper using a synthetic Bovada-like event
         ev = {
@@ -58,7 +62,15 @@ def test_week_odds_uses_csv_fallback(monkeypatch, tmp_path: Path):
         assert rows >= 3  # three outcomes
 
         # Call week odds endpoint in cache-only mode; using future_only=false to avoid time filters
-        r = client.get("/api/betting/odds/week/7", params={"league": "PL", "limit": 1, "cache_only": True, "future_only": False})
+        r = client.get(
+            "/api/betting/odds/week/7",
+            params={
+                "league": "PL",
+                "limit": 1,
+                "cache_only": True,
+                "future_only": False,
+            },
+        )
         assert r.status_code == 200
         payload = r.json()
         assert payload.get("week") == 7
@@ -70,7 +82,7 @@ def test_week_odds_uses_csv_fallback(monkeypatch, tmp_path: Path):
         odds = m.get("odds") or {}
         # Provider should be csv-historic (fallback path)
         assert odds.get("provider") in {"csv-historic", "closing-snapshot"}
-        mw = ((odds.get("market_odds") or {}).get("match_winner") or {})
+        mw = (odds.get("market_odds") or {}).get("match_winner") or {}
         assert isinstance(mw, dict) and any(mw.values()), "match_winner odds missing"
         # Check at least one decimal odds exists (from our CSV)
         assert (mw.get("home") or {}).get("odds")

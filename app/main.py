@@ -275,6 +275,7 @@ def _regenerate_predictions() -> Dict[str, Any]:
     except Exception as e:
         return {"error": str(e)}
 
+
 # Admin/debug endpoints registered after app initialization (moved below)
 
 
@@ -684,6 +685,7 @@ app = FastAPI(
     description="Advanced predictable soccer betting platform with comprehensive real EPL data and ML predictions",
     version="3.0.0",
 )
+
 
 # === Admin/debug: Bovada snapshot controls and coverage probes ===
 @app.post("/api/admin/bovada/refresh")
@@ -1635,7 +1637,9 @@ async def get_week_betting_odds(
                         pass
                     # If still missing expanded markets and this request isn't cache_only,
                     # make a final live attempt to attach Bovada markets.
-                    if (not odds.get("market_odds", {}).get("totals")) and (not cache_only):
+                    if (not odds.get("market_odds", {}).get("totals")) and (
+                        not cache_only
+                    ):
                         try:
                             odds = betting_odds_service.attach_bovada_markets(
                                 odds, home, away, dt, cache_only=False
@@ -2116,6 +2120,7 @@ def api_admin_odds_snapshot_csv(
                         from .services.team_name_normalizer import (
                             normalize_team_name as _norm3,
                         )
+
                         # Build a set of canonical pairs for fast membership
                         pair_set = set()
                         for m in matches or []:
@@ -2140,8 +2145,13 @@ def api_admin_odds_snapshot_csv(
                                 ea = _norm3(ev.get("away_team") or "") or ev.get(
                                     "away_team"
                                 )
-                                if eh and ea and (
-                                    f"{str(eh).lower()}|{str(ea).lower()}" in pair_set
+                                if (
+                                    eh
+                                    and ea
+                                    and (
+                                        f"{str(eh).lower()}|{str(ea).lower()}"
+                                        in pair_set
+                                    )
                                 ):
                                     filtered.append(ev)
                         events = filtered or []
@@ -2200,7 +2210,9 @@ def api_admin_goals_totals_snapshot_csv(
     bookmakers: Optional[str] = Query(
         None, description="Comma-list to filter bookmakers"
     ),
-    historical: bool = Query(False, description="Attempt historical endpoints if supported by provider"),
+    historical: bool = Query(
+        False, description="Attempt historical endpoints if supported by provider"
+    ),
     ts_from: Optional[str] = Query(None, description="Historical window start (ISO)"),
     ts_to: Optional[str] = Query(None, description="Historical window end (ISO)"),
 ):
@@ -2215,6 +2227,7 @@ def api_admin_goals_totals_snapshot_csv(
         total_rows = 0
         # Use a dedicated goals totals fetcher that can query totals markets explicitly
         from .services.odds_api_goals_service import fetch_goals_totals_from_odds_api
+
         sport_map = {
             "PL": "soccer_epl",
             "BL1": "soccer_germany_bundesliga",
@@ -2243,6 +2256,7 @@ def api_admin_goals_totals_snapshot_csv(
                 # append_totals_from_oddsapi supports records[] but expects bookmakers[].markets[]. We'll instead write CSV rows here.
                 from .services.odds_csv_store import _csv_path, _ensure_file
                 import csv as _csv
+
                 path = _csv_path(lg, "totals")
                 _ensure_file(path)
                 now = datetime.utcnow().isoformat() + "Z"
@@ -2251,62 +2265,86 @@ def api_admin_goals_totals_snapshot_csv(
                     for r in res.get("records") or []:
                         try:
                             date = str(r.get("date") or "")
-                            match_date = date.split("T")[0] if "T" in date else date[:10]
+                            match_date = (
+                                date.split("T")[0] if "T" in date else date[:10]
+                            )
                             home = r.get("home_team")
                             away = r.get("away_team")
-                            line = float(r.get("line")) if r.get("line") is not None else None
+                            line = (
+                                float(r.get("line"))
+                                if r.get("line") is not None
+                                else None
+                            )
                             over_odds = (
-                                float(r.get("over_odds")) if r.get("over_odds") is not None else None
+                                float(r.get("over_odds"))
+                                if r.get("over_odds") is not None
+                                else None
                             )
                             under_odds = (
-                                float(r.get("under_odds")) if r.get("under_odds") is not None else None
+                                float(r.get("under_odds"))
+                                if r.get("under_odds") is not None
+                                else None
                             )
                             bm = r.get("bookmaker") or "unknown"
-                            if not (home and away and match_date and isinstance(line, float)):
+                            if not (
+                                home and away and match_date and isinstance(line, float)
+                            ):
                                 continue
                             # Over row
-                            if isinstance(over_odds, (int, float)) and over_odds and over_odds > 1.0:
+                            if (
+                                isinstance(over_odds, (int, float))
+                                and over_odds
+                                and over_odds > 1.0
+                            ):
                                 ip = round(1.0 / float(over_odds), 6)
-                                w.writerow([
-                                    now,
-                                    lg,
-                                    week if week is not None else "",
-                                    "the-odds-api",
-                                    bm,
-                                    match_date,
-                                    date,
-                                    home,
-                                    away,
-                                    "totals",
-                                    "over",
-                                    line,
-                                    round(float(over_odds), 4),
-                                    "",
-                                    ip,
-                                    "",
-                                ])
+                                w.writerow(
+                                    [
+                                        now,
+                                        lg,
+                                        week if week is not None else "",
+                                        "the-odds-api",
+                                        bm,
+                                        match_date,
+                                        date,
+                                        home,
+                                        away,
+                                        "totals",
+                                        "over",
+                                        line,
+                                        round(float(over_odds), 4),
+                                        "",
+                                        ip,
+                                        "",
+                                    ]
+                                )
                                 total_rows += 1
                             # Under row
-                            if isinstance(under_odds, (int, float)) and under_odds and under_odds > 1.0:
+                            if (
+                                isinstance(under_odds, (int, float))
+                                and under_odds
+                                and under_odds > 1.0
+                            ):
                                 ip = round(1.0 / float(under_odds), 6)
-                                w.writerow([
-                                    now,
-                                    lg,
-                                    week if week is not None else "",
-                                    "the-odds-api",
-                                    bm,
-                                    match_date,
-                                    date,
-                                    home,
-                                    away,
-                                    "totals",
-                                    "under",
-                                    line,
-                                    round(float(under_odds), 4),
-                                    "",
-                                    ip,
-                                    "",
-                                ])
+                                w.writerow(
+                                    [
+                                        now,
+                                        lg,
+                                        week if week is not None else "",
+                                        "the-odds-api",
+                                        bm,
+                                        match_date,
+                                        date,
+                                        home,
+                                        away,
+                                        "totals",
+                                        "under",
+                                        line,
+                                        round(float(under_odds), 4),
+                                        "",
+                                        ip,
+                                        "",
+                                    ]
+                                )
                                 total_rows += 1
                         except Exception:
                             continue
@@ -2627,6 +2665,7 @@ def api_cron_snapshot_csv(
                         from .services.team_name_normalizer import (
                             normalize_team_name as _norm3,
                         )
+
                         pair_set = set()
                         for m in matches or []:
                             h = _norm3(
@@ -2650,16 +2689,23 @@ def api_cron_snapshot_csv(
                                 ea = _norm3(ev.get("away_team") or "") or ev.get(
                                     "away_team"
                                 )
-                                if eh and ea and (
-                                    f"{str(eh).lower()}|{str(ea).lower()}" in pair_set
+                                if (
+                                    eh
+                                    and ea
+                                    and (
+                                        f"{str(eh).lower()}|{str(ea).lower()}"
+                                        in pair_set
+                                    )
                                 ):
                                     filtered.append(ev)
                         events = filtered or []
                 except Exception:
                     pass
             total_rows += append_h2h_from_bovada(lg, events, week=week)
-            try: total_rows += append_totals_from_bovada(lg, events, week=week)
-            except Exception: pass
+            try:
+                total_rows += append_totals_from_bovada(lg, events, week=week)
+            except Exception:
+                pass
             try:
                 from .services.odds_csv_store import (
                     append_btts_from_bovada,
@@ -2674,10 +2720,17 @@ def api_cron_snapshot_csv(
                     append_cards_totals_from_bovada,
                     append_corners_handicap_from_bovada,
                 )
+
                 total_rows += append_btts_from_bovada(lg, events, week=week)
-                total_rows += append_first_half_totals_from_bovada(lg, events, week=week)
-                total_rows += append_second_half_totals_from_bovada(lg, events, week=week)
-                total_rows += append_team_goals_totals_from_bovada(lg, events, week=week)
+                total_rows += append_first_half_totals_from_bovada(
+                    lg, events, week=week
+                )
+                total_rows += append_second_half_totals_from_bovada(
+                    lg, events, week=week
+                )
+                total_rows += append_team_goals_totals_from_bovada(
+                    lg, events, week=week
+                )
                 total_rows += append_corners_totals_from_bovada(lg, events, week=week)
                 total_rows += append_team_corners_from_bovada(lg, events, week=week)
                 total_rows += append_double_chance_from_bovada(lg, events, week=week)
@@ -3368,7 +3421,12 @@ def api_admin_ensure_full_coverage(
         # Reload goals market store so newly written totals CSVs are available immediately
         try:
             totals_idx = reload_goals_market_store()
-            summary["steps"].append({"name": "reload-goals-markets", "result": {"totals_indexed": totals_idx}})
+            summary["steps"].append(
+                {
+                    "name": "reload-goals-markets",
+                    "result": {"totals_indexed": totals_idx},
+                }
+            )
         except Exception:
             pass
 
@@ -3392,9 +3450,13 @@ def api_admin_ensure_full_coverage(
 
 @app.post("/api/admin/weekly/write")
 def api_admin_weekly_write(
-    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD)"),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD)"
+    ),
     week: int = Query(..., ge=1, le=38),
-    include: Optional[str] = Query(None, description='Comma list subset of ["odds","predictions","results"]'),
+    include: Optional[str] = Query(
+        None, description='Comma list subset of ["odds","predictions","results"]'
+    ),
 ):
     """Generate per-league weekly CSVs and a bundle JSON for the frontend.
 
@@ -3415,6 +3477,7 @@ def api_admin_weekly_write(
 def api_get_weekly_bundle(league: str, week: int):
     """Return the weekly bundle JSON, building it from CSVs if missing."""
     from pathlib import Path as _P
+
     try:
         from .services.weekly_files_service import _weekly_paths, build_weekly_bundle
 
@@ -3424,7 +3487,13 @@ def api_get_weekly_bundle(league: str, week: int):
             # Build from existing CSVs (or create empty scaffold)
             build_weekly_bundle(lg, int(week))
         if not paths["bundle"].exists():
-            return {"league": lg, "week": int(week), "odds": [], "predictions": [], "results": []}
+            return {
+                "league": lg,
+                "week": int(week),
+                "odds": [],
+                "predictions": [],
+                "results": [],
+            }
         payload = json.loads(paths["bundle"].read_text(encoding="utf-8"))
         return payload
     except Exception as e:
@@ -3434,12 +3503,19 @@ def api_get_weekly_bundle(league: str, week: int):
 # Backfill: generate weekly artifacts for completed weeks
 @app.post("/api/admin/weekly/backfill")
 def api_admin_weekly_backfill(
-    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD) or ALL"
+    ),
     up_to_week: Optional[int] = Query(None, ge=1, le=38),
-    include: Optional[str] = Query(None, description='Comma list subset of ["odds","predictions","results"]'),
+    include: Optional[str] = Query(
+        None, description='Comma list subset of ["odds","predictions","results"]'
+    ),
 ):
     try:
-        from .services.weekly_files_service import backfill_completed_weeks, backfill_all_leagues
+        from .services.weekly_files_service import (
+            backfill_completed_weeks,
+            backfill_all_leagues,
+        )
 
         parts = [s.strip() for s in (include or "").split(",") if s.strip()] or None
         if (league or "").upper() == "ALL" or not league:
@@ -3456,8 +3532,12 @@ def api_admin_weekly_backfill(
 # Quick path: write odds CSVs without auth (UI-triggered, local/dev convenience)
 @app.post("/api/admin/odds/snapshot-csv/quick")
 def api_admin_odds_snapshot_csv_quick(
-    league: Optional[str] = Query(None, description="League code (PL, BL1, FL1, SA, PD) or ALL"),
-    include_odds_api: bool = Query(False, description="Include The Odds API rows if configured"),
+    league: Optional[str] = Query(
+        None, description="League code (PL, BL1, FL1, SA, PD) or ALL"
+    ),
+    include_odds_api: bool = Query(
+        False, description="Include The Odds API rows if configured"
+    ),
 ):
     try:
         leagues = []
@@ -3487,6 +3567,7 @@ def api_admin_odds_snapshot_csv_quick(
             append_cards_totals_from_bovada as _cards,
             append_corners_handicap_from_bovada as _ch,
         )
+
         for lg in leagues:
             snap = betting_odds_service._bovada_cache.get(lg) or {}
             events = snap.get("events") or []
@@ -3504,49 +3585,94 @@ def api_admin_odds_snapshot_csv_quick(
                             if hasattr(svc, "get_all_matches")
                             else enhanced_epl_service.get_all_matches()
                         )
-                        from .services.team_name_normalizer import normalize_team_name as _norm3
+                        from .services.team_name_normalizer import (
+                            normalize_team_name as _norm3,
+                        )
+
                         pair_set = set()
                         for m in matches or []:
-                            h = _norm3(m.get("home_team") or m.get("homeTeam") or (m.get("home") or {}).get("name")) or m.get("home_team")
-                            a = _norm3(m.get("away_team") or m.get("awayTeam") or (m.get("away") or {}).get("name")) or m.get("away_team")
+                            h = _norm3(
+                                m.get("home_team")
+                                or m.get("homeTeam")
+                                or (m.get("home") or {}).get("name")
+                            ) or m.get("home_team")
+                            a = _norm3(
+                                m.get("away_team")
+                                or m.get("awayTeam")
+                                or (m.get("away") or {}).get("name")
+                            ) or m.get("away_team")
                             if h and a:
                                 pair_set.add(f"{str(h).lower()}|{str(a).lower()}")
                         if pair_set:
                             events = [
-                                ev for ev in eu_events
+                                ev
+                                for ev in eu_events
                                 if (
-                                    (_norm3(ev.get("home_team") or "") or ev.get("home_team"))
-                                    and (_norm3(ev.get("away_team") or "") or ev.get("away_team"))
-                                    and (f"{str((_norm3(ev.get('home_team') or '') or ev.get('home_team')).lower())}|{str((_norm3(ev.get('away_team') or '') or ev.get('away_team')).lower())}" in pair_set)
+                                    (
+                                        _norm3(ev.get("home_team") or "")
+                                        or ev.get("home_team")
+                                    )
+                                    and (
+                                        _norm3(ev.get("away_team") or "")
+                                        or ev.get("away_team")
+                                    )
+                                    and (
+                                        f"{str((_norm3(ev.get('home_team') or '') or ev.get('home_team')).lower())}|{str((_norm3(ev.get('away_team') or '') or ev.get('away_team')).lower())}"
+                                        in pair_set
+                                    )
                                 )
                             ]
                 except Exception:
                     pass
             total_rows += _h2h(lg, events)
-            try: total_rows += _tot(lg, events)
-            except Exception: pass
-            try: total_rows += _btts(lg, events)
-            except Exception: pass
-            try: total_rows += _fh(lg, events)
-            except Exception: pass
-            try: total_rows += _sh(lg, events)
-            except Exception: pass
-            try: total_rows += _tgt(lg, events)
-            except Exception: pass
-            try: total_rows += _ct(lg, events)
-            except Exception: pass
-            try: total_rows += _tct(lg, events)
-            except Exception: pass
-            try: total_rows += _dc(lg, events)
-            except Exception: pass
-            try: total_rows += _dnb(lg, events)
-            except Exception: pass
-            try: total_rows += _ah(lg, events)
-            except Exception: pass
-            try: total_rows += _cards(lg, events)
-            except Exception: pass
-            try: total_rows += _ch(lg, events)
-            except Exception: pass
+            try:
+                total_rows += _tot(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _btts(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _fh(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _sh(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _tgt(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _ct(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _tct(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _dc(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _dnb(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _ah(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _cards(lg, events)
+            except Exception:
+                pass
+            try:
+                total_rows += _ch(lg, events)
+            except Exception:
+                pass
         return {"success": True, "rows_appended": total_rows, "leagues": leagues}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Quick CSV snapshot failed: {e}")
@@ -6920,7 +7046,9 @@ async def api_fetch_goals_markets(
         market_candidates = [markets, "totals", "total_goals", "alternate_totals"]
         chosen_records = []
         for mk in market_candidates:
-            res = _fetch_generic(sport_key=sport_key, regions=regions, markets=mk, bookmakers=bookmakers)
+            res = _fetch_generic(
+                sport_key=sport_key, regions=regions, markets=mk, bookmakers=bookmakers
+            )
             if isinstance(res, dict) and res.get("records"):
                 # Filter: goals lines typically within 0.5..6.5
                 for r in res["records"]:

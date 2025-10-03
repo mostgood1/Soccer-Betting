@@ -64,7 +64,11 @@ def _parse_totals_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 for o in outcomes:
                     name = (o.get("name") or "").strip().lower()
                     price = o.get("price")
-                    pt = o.get("point") if o.get("point") is not None else mk.get("point")
+                    pt = (
+                        o.get("point")
+                        if o.get("point") is not None
+                        else mk.get("point")
+                    )
                     if pt is None or not isinstance(price, (int, float)):
                         continue
                     try:
@@ -275,13 +279,17 @@ def fetch_goals_totals_from_odds_api(
                 st_ev, payload_ev = _fetch(ev_url, ev_params, timeout)
                 rows_ev: List[Dict[str, Any]] = []
                 if st_ev == 200:
-                    rows_ev = _parse_event_odds_history_payload(payload_ev, home, away, commence)
+                    rows_ev = _parse_event_odds_history_payload(
+                        payload_ev, home, away, commence
+                    )
                 if not rows_ev:
                     try_params = dict(ev_params)
                     try_params.pop("markets", None)
                     st2, payload2 = _fetch(ev_url, try_params, timeout)
                     if st2 == 200:
-                        rows_ev = _parse_event_odds_history_payload(payload2, home, away, commence)
+                        rows_ev = _parse_event_odds_history_payload(
+                            payload2, home, away, commence
+                        )
                 if not rows_ev:
                     continue
             else:

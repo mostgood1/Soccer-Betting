@@ -344,6 +344,7 @@ def append_btts_from_bovada(
 
 # -------- Additional market snapshotters (Bovada) --------
 
+
 def _match_datetime_from_event(ev: Dict[str, Any]) -> Tuple[str, str]:
     ct = ev.get("commence_time")
     if not ct:
@@ -441,7 +442,8 @@ def append_first_half_totals_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -451,8 +453,18 @@ def append_first_half_totals_from_bovada(
                 except Exception:
                     line = None
                 cnt += _write_ou_rows(
-                    w, now, league, week, match_date, commence, home, away,
-                    "first_half_totals", line, t.get("over_prob"), t.get("under_prob")
+                    w,
+                    now,
+                    league,
+                    week,
+                    match_date,
+                    commence,
+                    home,
+                    away,
+                    "first_half_totals",
+                    line,
+                    t.get("over_prob"),
+                    t.get("under_prob"),
                 )
     return cnt
 
@@ -467,7 +479,8 @@ def append_second_half_totals_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -477,8 +490,18 @@ def append_second_half_totals_from_bovada(
                 except Exception:
                     line = None
                 cnt += _write_ou_rows(
-                    w, now, league, week, match_date, commence, home, away,
-                    "second_half_totals", line, t.get("over_prob"), t.get("under_prob")
+                    w,
+                    now,
+                    league,
+                    week,
+                    match_date,
+                    commence,
+                    home,
+                    away,
+                    "second_half_totals",
+                    line,
+                    t.get("over_prob"),
+                    t.get("under_prob"),
                 )
     return cnt
 
@@ -493,7 +516,8 @@ def append_team_goals_totals_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -504,9 +528,20 @@ def append_team_goals_totals_from_bovada(
                 except Exception:
                     line = None
                 cnt += _write_ou_rows(
-                    w, now, league, week, match_date, commence, home, away,
-                    f"team_goals_totals_{side}" if side in ("home","away") else "team_goals_totals",
-                    line, t.get("over_prob"), t.get("under_prob")
+                    w,
+                    now,
+                    league,
+                    week,
+                    match_date,
+                    commence,
+                    home,
+                    away,
+                    f"team_goals_totals_{side}"
+                    if side in ("home", "away")
+                    else "team_goals_totals",
+                    line,
+                    t.get("over_prob"),
+                    t.get("under_prob"),
                 )
     return cnt
 
@@ -521,7 +556,8 @@ def append_corners_totals_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -531,8 +567,18 @@ def append_corners_totals_from_bovada(
                 except Exception:
                     line = None
                 cnt += _write_ou_rows(
-                    w, now, league, week, match_date, commence, home, away,
-                    "corners_totals", line, t.get("over_prob"), t.get("under_prob")
+                    w,
+                    now,
+                    league,
+                    week,
+                    match_date,
+                    commence,
+                    home,
+                    away,
+                    "corners_totals",
+                    line,
+                    t.get("over_prob"),
+                    t.get("under_prob"),
                 )
     return cnt
 
@@ -547,7 +593,8 @@ def append_team_corners_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -558,9 +605,20 @@ def append_team_corners_from_bovada(
                 except Exception:
                     line = None
                 cnt += _write_ou_rows(
-                    w, now, league, week, match_date, commence, home, away,
-                    f"team_corners_totals_{side}" if side in ("home","away") else "team_corners_totals",
-                    line, t.get("over_prob"), t.get("under_prob")
+                    w,
+                    now,
+                    league,
+                    week,
+                    match_date,
+                    commence,
+                    home,
+                    away,
+                    f"team_corners_totals_{side}"
+                    if side in ("home", "away")
+                    else "team_corners_totals",
+                    line,
+                    t.get("over_prob"),
+                    t.get("under_prob"),
                 )
     return cnt
 
@@ -575,7 +633,8 @@ def append_double_chance_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -589,10 +648,22 @@ def append_double_chance_from_bovada(
                         dec = ""
                     w.writerow(
                         [
-                            now, league, week if week is not None else "", "bovada", "bovada",
-                            match_date, commence, home, away,
-                            "double_chance", key,
-                            "", dec, "", round(float(prob), 6), "",
+                            now,
+                            league,
+                            week if week is not None else "",
+                            "bovada",
+                            "bovada",
+                            match_date,
+                            commence,
+                            home,
+                            away,
+                            "double_chance",
+                            key,
+                            "",
+                            dec,
+                            "",
+                            round(float(prob), 6),
+                            "",
                         ]
                     )
                     cnt += 1
@@ -609,7 +680,8 @@ def append_dnb_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -624,10 +696,22 @@ def append_dnb_from_bovada(
                         dec = ""
                     w.writerow(
                         [
-                            now, league, week if week is not None else "", "bovada", "bovada",
-                            match_date, commence, home, away,
-                            "dnb", label,
-                            "", dec, "", round(float(prob), 6), "",
+                            now,
+                            league,
+                            week if week is not None else "",
+                            "bovada",
+                            "bovada",
+                            match_date,
+                            commence,
+                            home,
+                            away,
+                            "dnb",
+                            label,
+                            "",
+                            dec,
+                            "",
+                            round(float(prob), 6),
+                            "",
                         ]
                     )
                     cnt += 1
@@ -644,13 +728,17 @@ def append_asian_handicap_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
             for t in ev.get("asian_handicap") or []:
                 line = t.get("line")
-                for side_key, prob_key in (("home", "home_prob"), ("away", "away_prob")):
+                for side_key, prob_key in (
+                    ("home", "home_prob"),
+                    ("away", "away_prob"),
+                ):
                     prob = t.get(prob_key)
                     if isinstance(prob, (int, float)) and prob > 0:
                         try:
@@ -659,10 +747,22 @@ def append_asian_handicap_from_bovada(
                             dec = ""
                         w.writerow(
                             [
-                                now, league, week if week is not None else "", "bovada", "bovada",
-                                match_date, commence, home, away,
-                                "asian_handicap", f"{side_key}",
-                                line if line is not None else "", dec, "", round(float(prob), 6), "",
+                                now,
+                                league,
+                                week if week is not None else "",
+                                "bovada",
+                                "bovada",
+                                match_date,
+                                commence,
+                                home,
+                                away,
+                                "asian_handicap",
+                                f"{side_key}",
+                                line if line is not None else "",
+                                dec,
+                                "",
+                                round(float(prob), 6),
+                                "",
                             ]
                         )
                         cnt += 1
@@ -679,7 +779,8 @@ def append_cards_totals_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
@@ -689,8 +790,18 @@ def append_cards_totals_from_bovada(
                 except Exception:
                     line = None
                 cnt += _write_ou_rows(
-                    w, now, league, week, match_date, commence, home, away,
-                    "cards_totals", line, t.get("over_prob"), t.get("under_prob")
+                    w,
+                    now,
+                    league,
+                    week,
+                    match_date,
+                    commence,
+                    home,
+                    away,
+                    "cards_totals",
+                    line,
+                    t.get("over_prob"),
+                    t.get("under_prob"),
                 )
     return cnt
 
@@ -705,13 +816,17 @@ def append_corners_handicap_from_bovada(
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         for ev in events or []:
-            home = ev.get("home_team"); away = ev.get("away_team")
+            home = ev.get("home_team")
+            away = ev.get("away_team")
             if not (home and away):
                 continue
             match_date, commence = _match_datetime_from_event(ev)
             for t in ev.get("corners_handicap") or []:
                 line = t.get("line")
-                for side_key, prob_key in (("home", "home_prob"), ("away", "away_prob")):
+                for side_key, prob_key in (
+                    ("home", "home_prob"),
+                    ("away", "away_prob"),
+                ):
                     prob = t.get(prob_key)
                     if isinstance(prob, (int, float)) and prob > 0:
                         try:
@@ -720,10 +835,22 @@ def append_corners_handicap_from_bovada(
                             dec = ""
                         w.writerow(
                             [
-                                now, league, week if week is not None else "", "bovada", "bovada",
-                                match_date, commence, home, away,
-                                "corners_handicap", f"{side_key}",
-                                line if line is not None else "", dec, "", round(float(prob), 6), "",
+                                now,
+                                league,
+                                week if week is not None else "",
+                                "bovada",
+                                "bovada",
+                                match_date,
+                                commence,
+                                home,
+                                away,
+                                "corners_handicap",
+                                f"{side_key}",
+                                line if line is not None else "",
+                                dec,
+                                "",
+                                round(float(prob), 6),
+                                "",
                             ]
                         )
                         cnt += 1
@@ -1298,6 +1425,7 @@ def load_h2h_index_from_csv(
         return {}
     # Use timezone-aware UTC for robust comparisons
     from datetime import timezone as _tz
+
     since = datetime.now(_tz.utc) - timedelta(days=max(days, 1))
     pref = None
     if preferred_bookmakers:

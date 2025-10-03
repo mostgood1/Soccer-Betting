@@ -49,9 +49,7 @@ def _week_matches(league: str, week: int) -> List[Dict[str, Any]]:
         svc = get_league_service(league)
     except Exception:
         svc = get_league_service("PL")
-    matches = (
-        svc.get_all_matches() if hasattr(svc, "get_all_matches") else []
-    )
+    matches = svc.get_all_matches() if hasattr(svc, "get_all_matches") else []
     weeks = game_week_service.organize_matches_by_week(matches)
     return weeks.get(int(week), [])
 
@@ -113,7 +111,7 @@ def write_weekly_odds(league: str, week: int, recent_days: int = 365) -> Dict[st
             rec = idx.get(key1) or idx.get(key2) or {}
             cons = rec.get("consensus_implied") or {}
             prefs = rec.get("preferred_decimals") or {}
-            
+
             def _dec(tag: str) -> Optional[float]:
                 v = prefs.get(tag)
                 if isinstance(v, (int, float)) and v > 1:
@@ -125,6 +123,7 @@ def write_weekly_odds(league: str, week: int, recent_days: int = 365) -> Dict[st
                 except Exception:
                     return None
                 return None
+
             dec_h = _dec("H")
             dec_d = _dec("D")
             dec_a = _dec("A")
@@ -132,20 +131,22 @@ def write_weekly_odds(league: str, week: int, recent_days: int = 365) -> Dict[st
             imp_d = cons.get("D")
             imp_a = cons.get("A")
             src = "csv-historic" if rec else "missing"
-            w.writerow([
-                lg,
-                int(week),
-                date,
-                hn,
-                an,
-                dec_h if dec_h is not None else "",
-                dec_d if dec_d is not None else "",
-                dec_a if dec_a is not None else "",
-                round(float(imp_h), 6) if isinstance(imp_h, (int, float)) else "",
-                round(float(imp_d), 6) if isinstance(imp_d, (int, float)) else "",
-                round(float(imp_a), 6) if isinstance(imp_a, (int, float)) else "",
-                src,
-            ])
+            w.writerow(
+                [
+                    lg,
+                    int(week),
+                    date,
+                    hn,
+                    an,
+                    dec_h if dec_h is not None else "",
+                    dec_d if dec_d is not None else "",
+                    dec_a if dec_a is not None else "",
+                    round(float(imp_h), 6) if isinstance(imp_h, (int, float)) else "",
+                    round(float(imp_d), 6) if isinstance(imp_d, (int, float)) else "",
+                    round(float(imp_a), 6) if isinstance(imp_a, (int, float)) else "",
+                    src,
+                ]
+            )
             rows += 1
     return {"path": str(paths["odds"]), "rows": rows}
 
@@ -209,20 +210,22 @@ def write_weekly_predictions(league: str, week: int) -> Dict[str, Any]:
             pick = pred.get("match_result")
             conf = pred.get("match_result_confidence")
             mv = advanced_ml_predictor.model_version
-            w.writerow([
-                lg,
-                int(week),
-                date,
-                hn,
-                an,
-                round(float(pH), 6) if isinstance(pH, (int, float)) else "",
-                round(float(pD), 6) if isinstance(pD, (int, float)) else "",
-                round(float(pA), 6) if isinstance(pA, (int, float)) else "",
-                round(float(total), 3) if isinstance(total, (int, float)) else "",
-                pick or "",
-                round(float(conf), 3) if isinstance(conf, (int, float)) else "",
-                str(mv),
-            ])
+            w.writerow(
+                [
+                    lg,
+                    int(week),
+                    date,
+                    hn,
+                    an,
+                    round(float(pH), 6) if isinstance(pH, (int, float)) else "",
+                    round(float(pD), 6) if isinstance(pD, (int, float)) else "",
+                    round(float(pA), 6) if isinstance(pA, (int, float)) else "",
+                    round(float(total), 3) if isinstance(total, (int, float)) else "",
+                    pick or "",
+                    round(float(conf), 3) if isinstance(conf, (int, float)) else "",
+                    str(mv),
+                ]
+            )
             rows += 1
     return {"path": str(paths["predictions"]), "rows": rows}
 
@@ -247,9 +250,7 @@ def write_weekly_results(league: str, week: int) -> Dict[str, Any]:
     # Filter week fixtures
     wk = int(week)
     subset = [
-        m
-        for m in fixtures
-        if (m.get("matchday") == wk) or (m.get("game_week") == wk)
+        m for m in fixtures if (m.get("matchday") == wk) or (m.get("game_week") == wk)
     ]
     paths = _weekly_paths(lg, wk)
     header = [
@@ -292,17 +293,19 @@ def write_weekly_results(league: str, week: int) -> Dict[str, Any]:
                 else:
                     res = "D"
             status = m.get("status") or ("COMPLETED" if res else (m.get("stage") or ""))
-            w.writerow([
-                lg,
-                wk,
-                date,
-                normalize_team_name(home) or home,
-                normalize_team_name(away) or away,
-                hs if hs is not None else "",
-                as_ if as_ is not None else "",
-                res,
-                status,
-            ])
+            w.writerow(
+                [
+                    lg,
+                    wk,
+                    date,
+                    normalize_team_name(home) or home,
+                    normalize_team_name(away) or away,
+                    hs if hs is not None else "",
+                    as_ if as_ is not None else "",
+                    res,
+                    status,
+                ]
+            )
             rows += 1
     return {"path": str(paths["results"]), "rows": rows}
 
@@ -313,7 +316,13 @@ def build_weekly_bundle(league: str, week: int) -> Dict[str, Any]:
 
     lg = (league or "PL").upper()
     paths = _weekly_paths(lg, int(week))
-    out: Dict[str, Any] = {"league": lg, "week": int(week), "odds": [], "predictions": [], "results": []}
+    out: Dict[str, Any] = {
+        "league": lg,
+        "week": int(week),
+        "odds": [],
+        "predictions": [],
+        "results": [],
+    }
     # Odds
     if paths["odds"].exists():
         with paths["odds"].open("r", newline="", encoding="utf-8") as f:
@@ -331,16 +340,25 @@ def build_weekly_bundle(league: str, week: int) -> Dict[str, Any]:
             out["results"] = list(r)
     # Persist bundle JSON
     paths["bundle"].write_text(json.dumps(out, indent=2), encoding="utf-8")
-    return {"path": str(paths["bundle"]), "counts": {k: len(v) for k, v in out.items() if isinstance(v, list)}}
+    return {
+        "path": str(paths["bundle"]),
+        "counts": {k: len(v) for k, v in out.items() if isinstance(v, list)},
+    }
 
 
-def write_all_weekly(league: str, week: int, include: Optional[List[str]] = None) -> Dict[str, Any]:
+def write_all_weekly(
+    league: str, week: int, include: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """Convenience: write selected artifacts and the bundle.
 
     include: subset of ["odds","predictions","results"]; default = all
     """
     parts = include or ["odds", "predictions", "results"]
-    res: Dict[str, Any] = {"league": (league or "PL").upper(), "week": int(week), "written": {}}
+    res: Dict[str, Any] = {
+        "league": (league or "PL").upper(),
+        "week": int(week),
+        "written": {},
+    }
     if "odds" in parts:
         res["written"]["odds"] = write_weekly_odds(league, week)
     if "predictions" in parts:
@@ -357,9 +375,7 @@ def _list_weeks(league: str) -> Dict[int, List[Dict[str, Any]]]:
         svc = get_league_service(league)
     except Exception:
         svc = get_league_service("PL")
-    matches = (
-        svc.get_all_matches() if hasattr(svc, "get_all_matches") else []
-    )
+    matches = svc.get_all_matches() if hasattr(svc, "get_all_matches") else []
     return game_week_service.organize_matches_by_week(matches)
 
 

@@ -41,7 +41,9 @@ def test_all_leagues_week_odds_csv_fallback(league: str, monkeypatch, tmp_path: 
         import app.main as main_mod
 
         monkeypatch.setattr(
-            main_mod, "get_league_service", lambda l=None: DummyLeagueService(league, matches)
+            main_mod,
+            "get_league_service",
+            lambda l=None: DummyLeagueService(league, matches),
         )
 
         # Write a CSV H2H row for this league
@@ -60,7 +62,13 @@ def test_all_leagues_week_odds_csv_fallback(league: str, monkeypatch, tmp_path: 
 
         # Call API (cache-only) and verify odds present
         r = client.get(
-            f"/api/betting/odds/week/7", params={"league": league, "limit": 1, "cache_only": True, "future_only": False}
+            f"/api/betting/odds/week/7",
+            params={
+                "league": league,
+                "limit": 1,
+                "cache_only": True,
+                "future_only": False,
+            },
         )
         assert r.status_code == 200
         payload = r.json()
@@ -70,8 +78,12 @@ def test_all_leagues_week_odds_csv_fallback(league: str, monkeypatch, tmp_path: 
         assert m["home_team"] == home and m["away_team"] == away
         odds = m.get("odds") or {}
         # Accept csv-historic (preferred) or closing-snapshot in fallback edges
-        assert (odds.get("provider") in {"csv-historic", "closing-snapshot"}) or (odds.get("market_odds") is not None)
-        mw = ((odds.get("market_odds") or {}).get("match_winner") or {})
-        assert isinstance(mw, dict) and any(mw.values()), f"match_winner missing for {league}"
+        assert (odds.get("provider") in {"csv-historic", "closing-snapshot"}) or (
+            odds.get("market_odds") is not None
+        )
+        mw = (odds.get("market_odds") or {}).get("match_winner") or {}
+        assert isinstance(mw, dict) and any(
+            mw.values()
+        ), f"match_winner missing for {league}"
     finally:
         os.chdir(old)

@@ -836,17 +836,34 @@ class BettingOddsService:
                         tokens = [t for t in s.split(" ") if t]
                         # filter out generic/non-distinct tokens
                         stop = {
+                            # common club designators
                             "fc",
                             "cf",
                             "afc",
+                            "cfc",
+                            "sc",
+                            "sd",
+                            "cd",
+                            "ac",
+                            "ss",
+                            "us",
+                            "asd",
+                            "ogc",
+                            "ud",
+                            "rcd",
+                            "ca",
+                            # generic/stop words
                             "the",
                             "club",
                             "football",
                             "calcio",
-                            "ss",
-                            "us",
-                            "acf",
-                            "ac",
+                            "and",
+                            # common articles/preps in romance languages
+                            "de",
+                            "la",
+                            "las",
+                            "los",
+                            "el",
                         }
                         return {t for t in tokens if t not in stop}
 
@@ -891,15 +908,22 @@ class BettingOddsService:
                     continue
                 if isinstance(snap, dict) and "events" in snap:
                     self._bovada_cache[key] = snap
-                    self._bovada_cache_expiry[key] = now_loc + timedelta(seconds=self.cache_duration)
+                    self._bovada_cache_expiry[key] = now_loc + timedelta(
+                        seconds=self.cache_duration
+                    )
                     try:
                         out_path = self._bovada_snap_dir / f"bovada_{key}.json"
                         out_path.parent.mkdir(parents=True, exist_ok=True)
                         with out_path.open("w", encoding="utf-8") as fh:
-                            json.dump({"timestamp": now_loc.isoformat(), "snapshot": snap}, fh)
+                            json.dump(
+                                {"timestamp": now_loc.isoformat(), "snapshot": snap}, fh
+                            )
                         ok[key] = {"events": len(snap.get("events") or [])}
                     except Exception as e:
-                        ok[key] = {"events": len(snap.get("events") or []), "persist_error": str(e)}
+                        ok[key] = {
+                            "events": len(snap.get("events") or []),
+                            "persist_error": str(e),
+                        }
                 else:
                     ok[key] = {"error": "no events"}
         except Exception as e:

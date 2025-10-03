@@ -52,7 +52,9 @@ def load_fixtures(league: str) -> List[Dict[str, Any]]:
     return []
 
 
-def extract_week_matches(fixtures: List[Dict[str, Any]], week: int) -> List[Tuple[str, str, str]]:
+def extract_week_matches(
+    fixtures: List[Dict[str, Any]], week: int
+) -> List[Tuple[str, str, str]]:
     """Return list of tuples (utc_date, home_name, away_name) for given matchday/week."""
     out: List[Tuple[str, str, str]] = []
     for m in fixtures:
@@ -73,14 +75,12 @@ def extract_week_matches(fixtures: List[Dict[str, Any]], week: int) -> List[Tupl
             home_name = (
                 (m.get("homeTeam") or {}).get("name")
                 if isinstance(m.get("homeTeam"), dict)
-                else m.get("home_team")
-                or m.get("home")
+                else m.get("home_team") or m.get("home")
             )
             away_name = (
                 (m.get("awayTeam") or {}).get("name")
                 if isinstance(m.get("awayTeam"), dict)
-                else m.get("away_team")
-                or m.get("away")
+                else m.get("away_team") or m.get("away")
             )
             if utc_date and home_name and away_name:
                 out.append((str(utc_date), str(home_name), str(away_name)))
@@ -112,7 +112,9 @@ def record_key(r: Dict[str, Any]) -> Tuple[str, str, str, float]:
     return date, home, away, float(line) if isinstance(line, (int, float)) else 0.0
 
 
-def upsert_records(out_path: Path, new_records: List[Dict[str, Any]]) -> Tuple[int, int]:
+def upsert_records(
+    out_path: Path, new_records: List[Dict[str, Any]]
+) -> Tuple[int, int]:
     existing = load_existing(out_path)
     existing_keys = {record_key(r) for r in existing}
     merged = list(existing)
@@ -131,7 +133,9 @@ def upsert_records(out_path: Path, new_records: List[Dict[str, Any]]) -> Tuple[i
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate manual goals totals lines from fixtures")
+    parser = argparse.ArgumentParser(
+        description="Generate manual goals totals lines from fixtures"
+    )
     parser.add_argument("--week", type=int, default=7, help="Matchday/week number")
     parser.add_argument(
         "--leagues",
@@ -168,7 +172,17 @@ def main():
             except Exception:
                 continue
     added, total = upsert_records(out_path, to_add)
-    print(json.dumps({"success": True, "added": added, "total_records": total, "output": str(out_path)}, indent=2))
+    print(
+        json.dumps(
+            {
+                "success": True,
+                "added": added,
+                "total_records": total,
+                "output": str(out_path),
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

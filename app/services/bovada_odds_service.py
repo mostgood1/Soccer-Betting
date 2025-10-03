@@ -194,6 +194,7 @@ def _fetch_bovada_coupon(
                     except Exception:
                         return None
                 return None
+
             # Teams
             comps = ev.get("competitors") or []
             home_name = None
